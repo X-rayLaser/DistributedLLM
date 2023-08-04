@@ -43,6 +43,30 @@ def propagate_tensor(address, embeddings):
     return result
 
 
+class DistributedLLM:
+    def __init__(self, addresses, extra_layers_path):
+        self.addresses = addresses
+        self.extra_layers_path = extra_layers_path
+
+    def generate(self, prompt, max_steps=200):
+        extra_layers_path = self.extra_layers_path
+        tokens = llm.tokenize_prompt(extra_layers_path, prompt)
+
+        for _ in range(max_steps):
+            embeddings = llm.prepare_embeddings(extra_layers_path, tokens)
+            embeddings = self.propagate_tensor(embeddings)
+            token = llm.get_next_token(extra_layers_path, embeddings)
+            token_str = llm.decode_token(extra_layers_path, token)
+            tokens.clear()
+            tokens.append(token)
+            yield token_str
+
+    def propagate_tensor(self, embeddings):
+        for host_with_port in self.addresses:
+            embeddings = propagate_tensor(host_with_port, embeddings)
+        return embeddings
+
+
 def parse_address(address):
     host, port = address.split(':')
     return host, int(port)
@@ -68,22 +92,12 @@ if __name__ == '__main__':
     prompt = args.prompt
     extra_layers_path = args.extra_layers
 
-    tokens = llm.tokenize_prompt(extra_layers_path, prompt)
-   
     num_steps = args.max_tokens
 
-    output = ""
-    for t in range(num_steps):
-        embeddings = llm.prepare_embeddings(extra_layers_path, tokens)
-        embeddings = propagate_tensor(address1, embeddings)
-        embeddings = propagate_tensor(address2, embeddings)
-        token = llm.get_next_token(extra_layers_path, embeddings)
-        token_str = llm.decode_token(extra_layers_path, token)
-        tokens.clear()
-        tokens.append(token)
+    distributed_llm = DistributedLLM([address1, address2], extra_layers_path)
 
+    for token_str in distributed_llm.generate(prompt, num_steps):
         s = token_str
-        output += s.strip('\n')
         print(f'{s}', end='', flush=True)
 
     print()

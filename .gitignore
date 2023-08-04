@@ -1,6 +1,6 @@
 *.pyc
 *.so
+*.json
 distllm/tensor_processor
 models/
 venv/
-
