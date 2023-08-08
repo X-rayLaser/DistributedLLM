@@ -7,7 +7,7 @@ import socket
 import struct
 import llm
 import numpy as np
-
+import scipy
 
 def propagate_tensor(address, embeddings):
     barray = bytearray()
@@ -45,8 +45,7 @@ def propagate_tensor(address, embeddings):
 
 
 def softmax(v):
-    p = np.exp(v)
-    return p / p.sum(axis=1, keepdims=True)
+    return scipy.special.softmax(v, axis=1)
 
 
 class DistributedLLM:
@@ -75,12 +74,8 @@ class DistributedLLM:
 
         embeddings = self.propagate_tensor(embeddings)
 
-        print('embeddings size', len(embeddings))
-
         tokens_shifted = tokens[1:]
         logits = llm.get_logits(extra_layers_path, embeddings)
-        print('logits size', len(logits))
-
         num_tokens_out = len(tokens) - 1
         assert len(logits) % num_tokens_out == 0
         logits = np.array(logits).reshape(num_tokens_out, -1)
@@ -89,17 +84,15 @@ class DistributedLLM:
 
         rows = np.arange(num_tokens_out)
         cols = tokens_shifted
-        print(cols, pmf.shape, logits.shape, flush=True)
+
         probabilities = pmf[rows, cols]
 
         nll = 0
 
         for t in range(num_tokens_out):
             nll -= np.log(probabilities[t])
-            #p *= probabilities[t]
         
         return np.exp(nll / num_tokens_out)
-        #return p ** (-1 / num_tokens_out)
 
     def propagate_tensor(self, embeddings):
         for host_with_port in self.addresses:

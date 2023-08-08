@@ -1,6 +1,7 @@
 import json
+from numpy import random
 from generate_text import DistributedLLM
-
+from datasets import load_dataset
 
 with open("./config.json") as f:
     s = f.read()
@@ -17,15 +18,29 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Compute perplexity using distributed LLM')
 
-    parser.add_argument('--prompt', type=str,
+    parser.add_argument('--dataset', type=str, default='',
+                        help='Dataset from Hugging Face dataset library')
+
+    parser.add_argument('--dataset_name', type=str, default='',
+                        help='Dataset name')
+
+
+    parser.add_argument('--prompt', type=str, default='',
                         help='Text used to compute perplexity')
 
-    parser.add_argument('--file', type=str,
-                        help='Path to a text file whose content will be used to compute perplexity')
+    parser.add_argument('--file', type=str, default='',
+                        help='Path to a text file')
     
     args = parser.parse_args()
     prompt = ''
-    if args.prompt:
+    
+    if args.dataset and args.dataset_name:
+        ds = load_dataset(args.dataset, args.dataset_name, split="test")
+        texts = ds["text"]
+        large_texts = [text for text in texts if 100 < len(text.strip()) < 2000]
+        prompt = random.choice(large_texts)
+        prompt = prompt.strip()[:100]
+    elif args.prompt:
         prompt = args.prompt
     elif args.file:
         with open(args.file) as f:
@@ -33,6 +48,8 @@ if __name__ == '__main__':
     else:
         raise Exception('Expects either --prompt or --file arguments to be provided. Got none of them')
     
+    print("Evaluating perplexity using prompt:\n")
+    print(prompt)
     score = distributed_llm.perplexity(prompt)
 
     print(score)

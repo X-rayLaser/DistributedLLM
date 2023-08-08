@@ -1,2 +1,6 @@
 requests
 numpy
+datasets
+flask
+uWSGI
+scipy
