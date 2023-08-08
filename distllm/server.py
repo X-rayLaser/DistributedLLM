@@ -3,6 +3,7 @@ from flask import Flask, request
 from generate_text import DistributedLLM
 
 
+
 with open("./config.json") as f:
     s = f.read()
 
@@ -23,6 +24,13 @@ def generate():
     gen = distributed_llm.generate(prompt, max_tokens)
     s = ''.join(gen)
     return s
+
+
+@app.route('/perplexity')
+def perplexity():
+    prompt = request.args.get('prompt')
+    score = distributed_llm.perplexity(prompt)
+    return str(score)
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ Uses prepared Distributed LLM Compute Service to generate text from LLM.
 import socket
 import struct
 import llm
+import numpy as np
 
 
 def propagate_tensor(address, embeddings):
@@ -43,6 +44,11 @@ def propagate_tensor(address, embeddings):
     return result
 
 
+def softmax(v):
+    p = np.exp(v)
+    return p / p.sum(axis=1, keepdims=True)
+
+
 class DistributedLLM:
     def __init__(self, addresses, extra_layers_path):
         self.addresses = addresses
@@ -60,6 +66,40 @@ class DistributedLLM:
             tokens.clear()
             tokens.append(token)
             yield token_str
+
+    def perplexity(self, text):
+        extra_layers_path = self.extra_layers_path
+        tokens = llm.tokenize_prompt(extra_layers_path, text)
+
+        embeddings = llm.prepare_embeddings(extra_layers_path, tokens[:-1])
+
+        embeddings = self.propagate_tensor(embeddings)
+
+        print('embeddings size', len(embeddings))
+
+        tokens_shifted = tokens[1:]
+        logits = llm.get_logits(extra_layers_path, embeddings)
+        print('logits size', len(logits))
+
+        num_tokens_out = len(tokens) - 1
+        assert len(logits) % num_tokens_out == 0
+        logits = np.array(logits).reshape(num_tokens_out, -1)
+
+        pmf = softmax(logits)
+
+        rows = np.arange(num_tokens_out)
+        cols = tokens_shifted
+        print(cols, pmf.shape, logits.shape, flush=True)
+        probabilities = pmf[rows, cols]
+
+        nll = 0
+
+        for t in range(num_tokens_out):
+            nll -= np.log(probabilities[t])
+            #p *= probabilities[t]
+        
+        return np.exp(nll / num_tokens_out)
+        #return p ** (-1 / num_tokens_out)
 
     def propagate_tensor(self, embeddings):
         for host_with_port in self.addresses:

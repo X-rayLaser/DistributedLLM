@@ -1,6 +1,7 @@
 version: "3"
 services:
   node1:
+    image: myimage
     build:
       context: .
       dockerfile: Dockerfile
@@ -13,9 +14,7 @@ services:
     command: "python -u deploy_node.py --host 0.0.0.0 --port 9998 ./models/open_llama_3b_ggml-model-q4_0_layers_0_12.bin"
 
   node2:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: myimage
     expose:
       - 9999
     ports:
@@ -27,9 +26,7 @@ services:
     command: "python -u deploy_node.py --host 0.0.0.0 --port 9999 ./models/open_llama_3b_ggml-model-q4_0_layers_13_25.bin"
 
   distllm-server:
-    build:
-      context: .
-      dockerfile: Dockerfile_server
+    image: myimage
     environment:
       ENV: DEV
     volumes:

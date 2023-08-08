@@ -1769,7 +1769,8 @@ std::vector<float> get_inputs(std::string extra_layers_path, const llama_token *
 }
 
 
-std::vector<float> get_llm_output(std::string extra_layers_path, const std::vector<float>& embeddings) {
+std::vector<float> get_llm_output(std::string extra_layers_path, const std::vector<float>& embeddings,
+                                  bool all_logits=false) {
     llama_model_loader loader(extra_layers_path, false);
 
     auto n_embd = loader.file_loader->hparams.n_embd;
@@ -1856,8 +1857,19 @@ std::vector<float> get_llm_output(std::string extra_layers_path, const std::vect
     struct ggml_tensor * res = gf.nodes[gf.n_nodes - 1];
 
     std::vector<float> logits_out;
-    logits_out.resize(n_vocab);
-    memcpy(logits_out.data(), (float *) ggml_get_data(res) + (n_vocab*(N-1)), sizeof(float)*n_vocab);
+    size_t logits_total;
+    int logits_offset;
+    if (all_logits) {
+        logits_total = N * n_vocab;
+        logits_offset = 0;
+    } else {
+        logits_total = n_vocab;
+        logits_offset = n_vocab * (N - 1);
+    }
+
+    std::cout << "IN get_llm_output: logits_total IS " << logits_total << std::endl;
+    logits_out.resize(logits_total);
+    memcpy(logits_out.data(), (float *) ggml_get_data(res) + logits_offset, sizeof(float) * logits_total);
 
     ggml_free(ctx0);
     ggml_free(weight_ctx);
@@ -2123,7 +2135,7 @@ get_logits(PyObject *self, PyObject *args) {
     const char* extra_layers_path_cstr;
     PyObject *embeddings_list;
     
-
+    //todo: add option to specify whether to return logits per all input embeddings
     if (!PyArg_ParseTuple(args, "sO", &extra_layers_path_cstr, &embeddings_list))
         return NULL;
 
@@ -2135,8 +2147,8 @@ get_logits(PyObject *self, PyObject *args) {
         return NULL;
     }
 
-    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings);
-
+    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings, true);
+    std::cout << "IN GET_LOGITS: LOGITS.SIZE() IS " << logits.size() << std::endl;
     PyObject* result = PyList_New(logits.size());
 
     for (size_t i = 0; i < logits.size(); i++)
