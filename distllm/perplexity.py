@@ -37,9 +37,9 @@ if __name__ == '__main__':
     if args.dataset and args.dataset_name:
         ds = load_dataset(args.dataset, args.dataset_name, split="test")
         texts = ds["text"]
-        large_texts = [text for text in texts if 100 < len(text.strip()) < 2000]
+        large_texts = [text for text in texts if 1000 < len(text.strip()) < 5000]
         prompt = random.choice(large_texts)
-        prompt = prompt.strip()[:100]
+        prompt = prompt.strip()[:750]
     elif args.prompt:
         prompt = args.prompt
     elif args.file:
