@@ -137,13 +137,64 @@ class VaryingChunkSocketMock(StableSocketMock):
         return super().recv(max_size)
 
 
+class SimpleServerSocketMock(StableSocketMock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.message = None
+
+    def sendall(self, buffer):
+        """Pretend that this code executes by server which store response in data attribute"""
+        msg = self.message.get_message()
+        body = self.message.get_body()
+        self.data = utils.encode_message(msg, body)
+
+    def set_reply_message(self, message):
+        """Sets response that client will receive"""
+        self.message = message
+
+
+class ComplexServerSocketMock(StableSocketMock):
+    def __init__(self):
+        super().__init__()
+        self.responses = {}
+
+    def sendall(self, buffer):
+        super().sendall(buffer)  # store data in the instance attributes
+
+        # use subroutines to read data from socket (this instance) and decode client message
+        msg, body = utils.receive_message(self)
+        message = utils.restore_message(msg, body)
+        message_text = message.get_message()
+
+        # use appropriate response message with mocked body from the test code
+        if message_text == "slices_request":
+            message_out_class = utils.JsonResponseWithSlices
+        elif message_text == "status_request":
+            message_out_class = utils.JsonResponseWithStatus
+        elif message_text == "load_slice_request":
+            message_out_class = utils.JsonResponseWithLoadedSlice
+        else:
+            raise Exception('Unrecognized message')
+        
+        body_out = self.responses[message_text]
+        message_out = message_out_class(**body_out)
+        
+        self.data = message_out.encode()
+        self.idx = 0
+
+    def set_reply_body(self, msg, body):
+        self.responses[msg] = body
+
+
 class ConnectionWithMockedServerTests(unittest.TestCase):
     address = ('name', 'some_ip', 22304)
 
+    def setUp(self):
+        self.connection = Connection(self.address)
+        self.socket = ComplexServerSocketMock()
+        self.connection.connect = lambda _ : self.socket
+
     def test_get_status_for_node_with_a_slice(self):
-        connection = Connection(self.address)
-        socket = StableSocketMock()
-        connection.connect = lambda addr: socket
         excepted_status = {
             'model': None,
             'connectivity': True,
@@ -154,17 +205,44 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
             'slice': [4, 23]
         }
 
-        message = utils.JsonResponseWithStatus(status_json=json.dumps(excepted_status))
-        message.send(socket)
+        status_json = json.dumps(excepted_status)
+        body = dict(status_json=status_json)
+        self.socket.set_reply_body("status_request", body)
 
-        status = connection.get_status()
+        status = self.connection.get_status()
 
         self.assertEqual(excepted_status, status)
 
+    def test_list_all_slices_gives_empty_list(self):
+        slices_json = json.dumps([])
+        self.socket.set_reply_body("slices_request", body=dict(slices_json=slices_json))
 
-    def test_list_all_slices_initially(self):
-        connection = Connection(self.address)
-        self.assertEqual([], connection.list_all_slices())
+        self.assertEqual([], self.connection.list_all_slices())
+
+    def test_list_all_slices(self):
+        expected_slices = [{
+            'model': 'llama_v1',
+            'layer_from': 0,
+            'layer_to': 12
+        }, {
+            'model': 'falcon',
+            'layer_from': 12,
+            'layer_to': 28
+        }]
+
+        slices_json = json.dumps(expected_slices)
+        self.socket.set_reply_body("slices_request", body=dict(slices_json=slices_json))
+
+        self.assertEqual(expected_slices, self.connection.list_all_slices())
+
+    def test_load_slice(self):
+        expected = {
+            'name': 'funky',
+            'model': 'falcon'
+        }
+
+        self.socket.set_reply_body("load_slice_request", body=expected)
+        self.assertEqual(expected, self.connection.load_slice('funky'))
 
 
 # todo: test sending and receiving of each Message subclasses

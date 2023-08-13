@@ -94,18 +94,32 @@ class Connection:
 
     def list_all_slices(self):
         """List all slices pushed to the compute node"""
-        return []
+        socket = self.connect(self.address)
+        message_out = RequestAllSlices()
+        message_out.send(socket)
+
+        message_text, body = receive_message(socket)
+        message = restore_message(message_text, body)
+        return json.loads(message.slices_json)
 
     def load_slice(self, name):
         """Load to memory a model slice with a given name"""
+        socket = self.connect(self.address)
+        message_out = RequestLoadSlice(name=name)
+        message_out.send(socket)
+
+        message_text, body = receive_message(socket)
+        message = restore_message(message_text, body)
+        return message.get_body()
 
     def get_status(self):
         """Receive compute node readiness status and meta information about the slice"""
         socket = self.connect(self.address)
+        message_out = RequestStatus()
+        message_out.send(socket)
         message_text, body = receive_message(socket)
         message = restore_message(message_text, body)
-        status = json.loads(message.status_json)
-        return status
+        return json.loads(message.status_json)
 
     def propagate_forward(self, tensor):
         """Send a tensor to a remote node and propagate it forward through layers of the slice"""
@@ -116,12 +130,38 @@ class Message:
     msg: ClassVar[str]
     
     def send(self, socket):
-        body = {name: value for name, value in self.__dict__.items() if name != 'msg'}
+        body = self.get_body()
         send_message(socket, self.msg, body)
+
+    def encode(self):
+        body = self.get_body()
+        return encode_message(self.msg, body)
+
+    def get_message(self):
+        return self.msg
+
+    def get_body(self):
+        return {name: value for name, value in self.__dict__.items() if name != 'msg'}
 
     @classmethod
     def from_body(cls, body):
-        raise NotImplementedError
+        return cls(**body)
+
+
+@dataclass
+class RequestAllSlices(Message):
+    msg: ClassVar[str] = "slices_request"
+
+
+@dataclass
+class RequestStatus(Message):
+    msg: ClassVar[str] = "status_request"
+
+
+@dataclass
+class RequestLoadSlice(Message):
+    msg: ClassVar[str] = "load_slice_request"
+    name: str
 
 
 @dataclass
@@ -132,6 +172,19 @@ class JsonResponseWithStatus(Message):
     @classmethod
     def from_body(cls, body):
         return cls(**body)
+
+
+@dataclass
+class JsonResponseWithSlices(Message):
+    msg: ClassVar[str] = "slices_list_response"
+    slices_json: str
+
+
+@dataclass
+class JsonResponseWithLoadedSlice(Message):
+    msg: ClassVar[str] = "loaded_slice_response"
+    name: str
+    model: str
 
 
 @dataclass
@@ -161,6 +214,16 @@ class SliceSubmissionEnd(Message):
 def restore_message(message, body):
     if message == 'status_response':
         return JsonResponseWithStatus(status_json=body['status_json'])
+    elif message == 'slices_list_response':
+        return JsonResponseWithSlices(slices_json=body['slices_json'])
+    elif message == 'slices_request':
+        return RequestAllSlices()
+    elif message == 'status_request':
+        return RequestStatus()
+    elif message == 'load_slice_request':
+        return RequestLoadSlice.from_body(body)
+    elif message == 'loaded_slice_response':
+        return JsonResponseWithLoadedSlice.from_body(body)
     else:
         raise Exception(f'Unrecognized message {message}')
 
@@ -169,6 +232,11 @@ MAX_MESSAGE_SIZE = 30
 
 
 def send_message(socket, message, body):
+    all_data = encode_message(message, body)
+    socket.sendall(all_data)
+
+
+def encode_message(message, body):
     payload = bytearray()
 
     if len(message) > MAX_MESSAGE_SIZE:
@@ -205,7 +273,7 @@ def send_message(socket, message, body):
     total_size = len(digest_data) + len(payload)
 
     all_data = encode_length(total_size) + digest_data + bytes(payload)
-    socket.sendall(all_data)
+    return all_data
 
 
 class TooLongMessageStringError(Exception):
