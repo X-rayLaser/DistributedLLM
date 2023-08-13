@@ -277,6 +277,12 @@ def encode_message(message, body):
         elif isinstance(field, int):
             field_type = coder.encode_string('int')
             field_data = coder.encode_int(field)
+        elif isinstance(field, float):
+            field_type = coder.encode_string('float')
+            field_data = coder.encode_float(field)
+        elif isinstance(field, list):
+            field_type = coder.encode_string('list')
+            field_data = coder.encode_list(field)
         elif field is None:
             field_type = coder.encode_string('NoneType')
             field_data = coder.encode_string('None')
@@ -320,6 +326,10 @@ def receive_message(socket):
             value = parser.parse_string()
         elif param_type == 'int':
             value = parser.parse_int()
+        elif param_type == 'float':
+            value = parser.parse_float()
+        elif param_type == 'list':
+            value = parser.parse_list()
         elif param_type == 'NoneType':
             parser.parse_string()
             value = None
@@ -345,6 +355,12 @@ class ByteStreamParser:
     def parse_blob(self):
         return self._parse(self.coder.decode_blob)
 
+    def parse_float(self):
+        return self._parse(self.coder.decode_float)
+
+    def parse_list(self):
+        return self._parse(self.coder.decode_list)
+
     def _parse(self, decode_func):
         value, new_pos = decode_func(self.stream[self.pos:])
         self.pos += new_pos
@@ -353,14 +369,21 @@ class ByteStreamParser:
 
 class ByteCoder:
     def encode_int(self, value):
-        return self._encode_int('i', value)
+        return self._encode_number('i', value)
 
     def decode_int(self, value_bytes):
         if len(value_bytes) < 4:
             raise ByteCodingError
         
         new_byte_position = 4
-        return self._decode_int('i', value_bytes[:4]), new_byte_position
+        return self._decode_number('i', value_bytes[:4]), new_byte_position
+
+    def encode_float(self, value):
+        return self._encode_number('f', value)
+
+    def decode_float(self, float_bytes):
+        new_pos = 4
+        return self._decode_number('f', float_bytes[:new_pos]), new_pos
 
     def encode_string(self, s):
         utf_enc = s.encode('utf-8')
@@ -382,6 +405,30 @@ class ByteCoder:
 
         return s, new_pos + length
 
+    def encode_list(self, alist):
+        size = len(alist)
+        size_bytes = self.encode_int(size)
+
+        barr = bytearray()
+        barr.extend(size_bytes)
+        for element in alist:
+            barr.extend(self.encode_float(element))
+        
+        return bytes(barr)
+
+    def decode_list(self, list_bytes):
+        value_size = 4
+        num_elems, list_offset = self.decode_int(list_bytes[:value_size])
+        if len(list_bytes) - list_offset < num_elems * value_size:
+            raise ByteCodingError
+        
+        res = []
+        for i in range(num_elems):
+            pos = i * value_size + list_offset
+            value = struct.unpack('f', list_bytes[pos:pos + value_size])[0]
+            res.append(value)
+        return res, list_offset + num_elems * value_size
+
     def encode_blob(self, blob):
         length = self.encode_int(len(blob))
         return length + blob
@@ -397,13 +444,13 @@ class ByteCoder:
 
         return encoded_blob[payload_offset:new_pos], new_pos
 
-    def _encode_int(self, format, value):
+    def _encode_number(self, format, value):
         try:
             return struct.pack(format, value)
         except struct.error as e:
             raise ByteCodingError(str(e))
 
-    def _decode_int(self, format, value_bytes):
+    def _decode_number(self, format, value_bytes):
         try:
             return struct.unpack(format, value_bytes)[0]
         except struct.error as e:

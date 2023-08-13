@@ -378,11 +378,37 @@ class SendAndReceiveMessageTests(unittest.TestCase):
 
     def test_send_message_with_diverse_payload(self):
         original = 'do something'
-        body = dict(foo="some text", bar=32, extra_data=bytes([12, 39, 104, 210]))
+        body = dict(foo="some text",
+                    bar=32,
+                    extra_data=bytes([12, 39, 104, 210]))
         utils.send_message(self.socket, original, body)
         message, received_body = utils.receive_message(self.socket)
         self.assertEqual(original, message)
         self.assertEqual(body, received_body)
+
+    def test_send_message_with_float_param(self):
+        original = 'do something'
+        body = dict(floating_point_number=3284.2149)
+        utils.send_message(self.socket, original, body)
+        message, received_body = utils.receive_message(self.socket)
+        self.assertEqual(original, message)
+        self.assertEqual(set(body.keys()), set(received_body.keys()))
+        self.assertEqual(len(body), len(received_body))
+        self.assertAlmostEqual(body["floating_point_number"],
+                               received_body["floating_point_number"], places=3)
+
+    def test_send_message_with_list_param(self):
+        original = 'do something'
+        alist = [42.9, -21.385, 8032.104, 734.0]
+        body = dict(alist=alist)
+        utils.send_message(self.socket, original, body)
+        message, received_body = utils.receive_message(self.socket)
+
+        self.assertEqual(original, message)
+
+        self.assertEqual(len(alist), len(received_body["alist"]))
+        for i in range(len(alist)):
+            self.assertAlmostEqual(alist[i], received_body["alist"][i], places=3)
 
 
 class DataTransmissionTests(unittest.TestCase):
@@ -454,6 +480,23 @@ class ByteCoderTests(unittest.TestCase):
         # not enough bytes
         self.assertRaises(utils.ByteCodingError, lambda: self.coder.decode_int(b'aef'))
 
+    def test_on_floats(self):
+        encoded_float = self.coder.encode_float(0)
+        new_offset = 4
+        expected_value = (0, new_offset)
+        self.assertEqual(expected_value, self.coder.decode_float(encoded_float))
+        self.assertEqual(expected_value, self.coder.decode_float(encoded_float + b'ignored_bytes'))
+
+        value = 432.84302
+        encoded_value = self.coder.encode_float(value)
+        decoded_value, new_pos = self.coder.decode_float(encoded_value + b'ignored_bytes')
+
+        self.assertEqual(new_offset, new_pos)
+        self.assertAlmostEqual(value, decoded_value, places=4)
+
+        # not enough bytes
+        self.assertRaises(utils.ByteCodingError, lambda: self.coder.decode_float(b'aef'))
+
     def test_on_strings(self):
         # decoding string that is smaller than its specified length
         length = 5
@@ -472,6 +515,25 @@ class ByteCoderTests(unittest.TestCase):
         self.assertEqual(expected_value, self.coder.decode_string(binary_str))
 
         self.assertEqual(expected_value, self.coder.decode_string(binary_str + b'extrabytes'))
+
+    def test_on_lists_of_floats(self):
+        # decoding list that is smaller than its specified size
+        size = 3
+        list_bytes = self.coder.encode_int(size) + b'abcdefgh'
+        self.assertRaises(utils.ByteCodingError, lambda: self.coder.decode_list(list_bytes))
+
+        # number of bytes in the payload is not multiple of 4
+        list_bytes = self.coder.encode_int(size) + b'abcdefghij'
+        self.assertRaises(utils.ByteCodingError, lambda: self.coder.decode_list(list_bytes))
+
+        alist = [0.24, 832., 142.5, 0.0, -241.90]
+        encoded_list = self.coder.encode_list(alist)
+        decoded_list, new_pos = self.coder.decode_list(encoded_list + b'Bytes to ignore')
+        self.assertEqual(len(alist) * 4 + 4, new_pos)
+
+        self.assertEqual(len(alist), len(decoded_list))
+        for i in range(len(alist)):
+            self.assertAlmostEqual(alist[i], decoded_list[i], places=2)
 
     def test_on_binary_data(self):
         # not enough bytes to decode blob of a given size
