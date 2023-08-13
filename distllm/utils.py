@@ -110,6 +110,8 @@ class Connection:
 
         message_text, body = receive_message(socket)
         message = restore_message(message_text, body)
+        if message_text == 'operation_failure':
+            raise OperationFailedError('')
         return message.get_body()
 
     def get_status(self):
@@ -123,6 +125,10 @@ class Connection:
 
     def propagate_forward(self, tensor):
         """Send a tensor to a remote node and propagate it forward through layers of the slice"""
+
+
+class OperationFailedError(Exception):
+    pass
 
 
 @dataclass
@@ -188,6 +194,14 @@ class JsonResponseWithLoadedSlice(Message):
 
 
 @dataclass
+class ResponseWithError(Message):
+    msg: ClassVar[str] = "operation_failure"
+    operation: str
+    error: str
+    description: str
+
+
+@dataclass
 class SliceSubmissionBegin(Message):
     model: str
     layer_from: int
@@ -224,6 +238,8 @@ def restore_message(message, body):
         return RequestLoadSlice.from_body(body)
     elif message == 'loaded_slice_response':
         return JsonResponseWithLoadedSlice.from_body(body)
+    elif message == 'operation_failure':
+        return ResponseWithError.from_body(body)
     else:
         raise Exception(f'Unrecognized message {message}')
 

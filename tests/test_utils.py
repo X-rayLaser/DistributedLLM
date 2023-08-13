@@ -156,6 +156,7 @@ class SimpleServerSocketMock(StableSocketMock):
 class ComplexServerSocketMock(StableSocketMock):
     def __init__(self):
         super().__init__()
+        self.errors = {}
         self.responses = {}
 
     def sendall(self, buffer):
@@ -167,20 +168,34 @@ class ComplexServerSocketMock(StableSocketMock):
         message_text = message.get_message()
 
         # use appropriate response message with mocked body from the test code
-        if message_text == "slices_request":
-            message_out_class = utils.JsonResponseWithSlices
-        elif message_text == "status_request":
-            message_out_class = utils.JsonResponseWithStatus
-        elif message_text == "load_slice_request":
-            message_out_class = utils.JsonResponseWithLoadedSlice
+        error_body_out = self.errors.get(message_text)
+
+        response_classes = {
+            'slices_request': utils.JsonResponseWithSlices,
+            'status_request': utils.JsonResponseWithStatus,
+            'load_slice_request': utils.JsonResponseWithLoadedSlice
+        }
+
+        error_response_classes = {
+            'load_slice_request': utils.ResponseWithError
+        }
+
+        if error_body_out:
+            message_out_class = error_response_classes[message_text]
+            message_out = message_out_class(**error_body_out)
         else:
-            raise Exception('Unrecognized message')
-        
-        body_out = self.responses[message_text]
-        message_out = message_out_class(**body_out)
+            try:
+                message_out_class = response_classes[message_text]
+            except KeyError:
+                raise Exception(f'No response for message {message_text}')
+            body_out = self.responses[message_text]
+            message_out = message_out_class(**body_out)
         
         self.data = message_out.encode()
         self.idx = 0
+
+    def set_error_body(self, msg, body):
+        self.errors[msg] = body
 
     def set_reply_body(self, msg, body):
         self.responses[msg] = body
@@ -243,6 +258,16 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
 
         self.socket.set_reply_body("load_slice_request", body=expected)
         self.assertEqual(expected, self.connection.load_slice('funky'))
+
+    def test_load_slice_unsuccessful(self):
+        expected = {
+            'operation': 'load_slice',
+            'error': 'Brief error',
+            'description': 'Details'
+        }
+        self.socket.set_error_body("load_slice_request", body=expected)
+        self.assertRaises(utils.OperationFailedError,
+                          lambda: self.connection.load_slice('funky'))
 
 
 # todo: test sending and receiving of each Message subclasses
