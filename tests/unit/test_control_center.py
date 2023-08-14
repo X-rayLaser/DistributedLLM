@@ -1,6 +1,7 @@
 import unittest
 import json
 from io import BytesIO
+import hashlib
 
 from distllm.control_center import ControlCenter, ModelSlice, NodeProvisioningError
 from distllm.control_center import Connection, OperationFailedError
@@ -241,9 +242,47 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         self.socket.set_reply_body("request_file_submission_end", body=end_response_body)
 
         f = BytesIO(data)
-        result = self.connection.push_file(f, chunk_size=4)
+        metadata = {"field": "value", "another": 32}
+        metadata_json = json.dumps(metadata)
+        result = self.connection.push_file(f, metadata, chunk_size=4)
 
         self.assertEqual(end_response_body, result)
+
+        # assert that server received requests and data as expected
+
+        self.assertEqual(5, len(self.socket.recorded_requests))
+
+        begin_request = self.socket.recorded_requests[0]
+        self.assertEqual(protocol.RequestFileSubmissionBegin(metadata_json), begin_request)
+
+        # assert server received valid submission id, part number and data
+        # request sending part # 1
+        part_request1 = self.socket.recorded_requests[1]
+        expected_request = protocol.RequestSubmitPart(
+            submission_id=832, part_number=0, data=data[:4]
+        )
+        self.assertEqual(expected_request, part_request1)
+        
+        # request sending part # 2
+        part_request2 = self.socket.recorded_requests[2]
+        expected_request = protocol.RequestSubmitPart(
+            submission_id=832, part_number=1, data=data[4:8]
+        )
+        self.assertEqual(expected_request, part_request2)
+
+        # request sending part # 3
+        part_request3 = self.socket.recorded_requests[3]
+        expected_request = protocol.RequestSubmitPart(
+            submission_id=832, part_number=2, data=data[8:]
+        )
+        self.assertEqual(expected_request, part_request3)
+
+        # check that server receives submission_id and checksum
+        submission_end_request = self.socket.recorded_requests[4]
+        checksum = hashlib.sha256(data).hexdigest()
+        expected_request = protocol.RequestFileSubmissionEnd(submission_id=832,
+                                                             checksum=checksum)
+        self.assertEqual(expected_request, submission_end_request)
 
     def test_push_file_succeeds_with_chunk_resubmission(self):
         data = b'Hello, World'

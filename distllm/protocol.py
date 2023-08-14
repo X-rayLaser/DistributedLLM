@@ -35,6 +35,9 @@ class Message(metaclass=Meta):
     def get_body(self):
         return {name: value for name, value in self.__dict__.items() if name != 'msg'}
 
+    def __eq__(self, message: object) -> bool:
+        return type(self) == type(message) and self.get_body() == message.get_body()
+
     @classmethod
     def from_body(cls, body):
         return cls(**body)

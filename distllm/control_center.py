@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from distllm import utils, protocol
+import hashlib
 
 
 class ControlCenter:
@@ -110,17 +111,20 @@ class Connection:
 
         total_bytes_read = 0
         part = 0
+
+        hasher = hashlib.sha256()
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
                 break
 
             total_bytes_read += len(chunk)
+            hasher.update(chunk)
 
             self.send_chunk(chunk, submission_id, part, socket)
             part += 1
         
-        checksum = ''
+        checksum = hasher.hexdigest()
         protocol.RequestFileSubmissionEnd(submission_id, checksum).send(socket)
         msg, body = protocol.receive_message(socket)
         message = protocol.restore_message(msg, body)

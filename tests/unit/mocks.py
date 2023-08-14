@@ -53,6 +53,8 @@ class ComplexServerSocketMock(StableSocketMock):
 
         self.response_functions = {}
 
+        self.recorded_requests = []
+
     def sendall(self, buffer):
         super().sendall(buffer)  # store data in the instance attributes
 
@@ -60,6 +62,7 @@ class ComplexServerSocketMock(StableSocketMock):
         msg, body = protocol.receive_message(self)
         message = protocol.restore_message(msg, body)
         message_text = message.get_message()
+        self.recorded_requests.append(message)
 
         # use appropriate response message with mocked body from the test code
         func = self.response_functions.get(message_text)
