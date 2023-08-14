@@ -99,12 +99,9 @@ class Connection:
         socket = self.connect(self.address)
         metadata_json = json.dumps(metadata)
         message_out = protocol.RequestFileSubmissionBegin(metadata_json)
-        message_out.send(socket)
+        message = self._get_response(message_out, socket)
 
-        msg, body = protocol.receive_message(socket)
-        message = protocol.restore_message(msg, body)
-
-        if msg == "operation_failure":
+        if message.msg == "operation_failure":
             raise OperationFailedError
 
         submission_id = message.submission_id
@@ -121,30 +118,29 @@ class Connection:
             total_bytes_read += len(chunk)
             hasher.update(chunk)
 
-            self.send_chunk(chunk, submission_id, part, socket)
+            self._send_chunk(chunk, submission_id, part, socket)
             part += 1
         
         checksum = hasher.hexdigest()
-        protocol.RequestFileSubmissionEnd(submission_id, checksum).send(socket)
-        msg, body = protocol.receive_message(socket)
-        message = protocol.restore_message(msg, body)
-
-        if msg == "operation_failure":
+        message_out = protocol.RequestFileSubmissionEnd(submission_id, checksum)
+        message = self._get_response(message_out, socket)
+        
+        if message.msg == "operation_failure":
             raise OperationFailedError
 
-        if msg == "file_submission_end_response":
+        if message.msg == "file_submission_end_response":
             if message.total_size != total_bytes_read:
                 raise OperationFailedError
             return message.get_body()
         else:
-            raise OperationFailedError(f'Unexpected message code in response: {msg}')
+            raise OperationFailedError(f'Unexpected message code in response: {message.msg}')
 
-    def send_chunk(self, data, submission_id, part, socket, max_retries=3):
+    def _send_chunk(self, data, submission_id, part, socket, max_retries=3):
         for _ in range(max_retries):
-            protocol.RequestSubmitPart(submission_id, part, data).send(socket)
-            msg, body = protocol.receive_message(socket)
-            message = protocol.restore_message(msg, body)
+            message_out = protocol.RequestSubmitPart(submission_id, part, data)
 
+            message = self._get_response(message_out, socket)
+            msg = message.msg
             if msg == 'operation_failure':
                 if message.error == 'integrity_error':
                     continue
@@ -160,21 +156,16 @@ class Connection:
         """List all slices pushed to the compute node"""
         socket = self.connect(self.address)
         message_out = protocol.RequestAllSlices()
-        message_out.send(socket)
-
-        message_text, body = protocol.receive_message(socket)
-        message = protocol.restore_message(message_text, body)
+        message = self._get_response(message_out, socket)
         return json.loads(message.slices_json)
 
     def load_slice(self, name):
         """Load to memory a model slice with a given name"""
         socket = self.connect(self.address)
         message_out = protocol.RequestLoadSlice(name=name)
-        message_out.send(socket)
-
-        message_text, body = protocol.receive_message(socket)
-        message = protocol.restore_message(message_text, body)
-        if message_text == 'operation_failure':
+        message = self._get_response(message_out, socket)
+        
+        if message.get_message() == 'operation_failure':
             raise OperationFailedError('')
         return message.get_body()
 
@@ -182,9 +173,7 @@ class Connection:
         """Receive compute node readiness status and meta information about the slice"""
         socket = self.connect(self.address)
         message_out = protocol.RequestStatus()
-        message_out.send(socket)
-        message_text, body = protocol.receive_message(socket)
-        message = protocol.restore_message(message_text, body)
+        message = self._get_response(message_out, socket)
         return json.loads(message.status_json)
 
     def propagate_forward(self, tensor, shape):
@@ -192,9 +181,9 @@ class Connection:
         socket = self.connect(self.address)
         axis0, axis1 = shape
         message_out = protocol.RequestPropagateForward(axis0, axis1, tensor)
-        message_out.send(socket)
-        message_text, body = protocol.receive_message(socket)
-        message = protocol.restore_message(message_text, body)
+
+        message = self._get_response(message_out, socket)
+
         if message.get_message() == "operation_failure":
             raise OperationFailedError
         elif message.get_message() == "tensor_response":
@@ -208,6 +197,11 @@ class Connection:
                 raise OperationFailedError
         else:
             raise Exception(f'Cannot handle unrecognized message')
+
+    def _get_response(self, request, socket):
+        request.send(socket)
+        message_text, body = protocol.receive_message(socket)
+        return protocol.restore_message(message_text, body)
 
 
 class OperationFailedError(Exception):
