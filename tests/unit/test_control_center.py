@@ -136,6 +136,9 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
 
         self.assertEqual(excepted_status, status)
 
+        self.assertEqual(1, len(self.socket.recorded_requests))
+        self.assertEqual(protocol.RequestStatus(), self.socket.recorded_requests[0])
+
     def test_list_all_slices_gives_empty_list(self):
         slices_json = json.dumps([])
         self.socket.set_reply_body("slices_request", body=dict(slices_json=slices_json))
@@ -158,6 +161,9 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
 
         self.assertEqual(expected_slices, self.connection.list_all_slices())
 
+        self.assertEqual(1, len(self.socket.recorded_requests))
+        self.assertEqual(protocol.RequestAllSlices(), self.socket.recorded_requests[0])
+
     def test_load_slice(self):
         expected = {
             'name': 'funky',
@@ -166,6 +172,10 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
 
         self.socket.set_reply_body("load_slice_request", body=expected)
         self.assertEqual(expected, self.connection.load_slice('funky'))
+
+        self.assertEqual(1, len(self.socket.recorded_requests))
+        expected_request = protocol.RequestLoadSlice(name='funky')
+        self.assertEqual(expected_request, self.socket.recorded_requests[0])
 
     def test_load_slice_unsuccessful(self):
         response_body = {
@@ -214,6 +224,12 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         input_tensor = list(range(200))
         shape = [10, 20]
         result = self.connection.propagate_forward(input_tensor, tuple(shape))
+
+        self.assertEqual(1, len(self.socket.recorded_requests))
+        expected_request = protocol.RequestPropagateForward(
+            axis0=10, axis1=20, values=input_tensor
+        )
+        self.assertEqual(expected_request, self.socket.recorded_requests[0])
 
         self.assertEqual(shape, result['shape'])
         self.assertEqual(len(input_tensor), len(result['values']))
@@ -377,8 +393,6 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         self.assertRaises(OperationFailedError,
                           lambda: self.connection.push_file(f, chunk_size=4))
  
-
-
 
 if __name__ == '__main__':
     unittest.main()
