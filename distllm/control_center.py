@@ -90,6 +90,68 @@ class Connection:
         Send a model slice to a remote compute node.
         """
 
+    def push_file(self, f, metadata=None, chunk_size=1024):
+        """
+        Send a file to a remote compute node
+        """
+
+        socket = self.connect(self.address)
+        metadata_json = json.dumps(metadata)
+        message_out = protocol.RequestFileSubmissionBegin(metadata_json)
+        message_out.send(socket)
+
+        msg, body = protocol.receive_message(socket)
+        message = protocol.restore_message(msg, body)
+
+        if msg == "operation_failure":
+            raise OperationFailedError
+
+        submission_id = message.submission_id
+
+        total_bytes_read = 0
+        part = 0
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+
+            total_bytes_read += len(chunk)
+
+            self.send_chunk(chunk, submission_id, part, socket)
+            part += 1
+        
+        checksum = ''
+        protocol.RequestFileSubmissionEnd(submission_id, checksum).send(socket)
+        msg, body = protocol.receive_message(socket)
+        message = protocol.restore_message(msg, body)
+
+        if msg == "operation_failure":
+            raise OperationFailedError
+
+        if msg == "file_submission_end_response":
+            if message.total_size != total_bytes_read:
+                raise OperationFailedError
+            return message.get_body()
+        else:
+            raise OperationFailedError(f'Unexpected message code in response: {msg}')
+
+    def send_chunk(self, data, submission_id, part, socket, max_retries=3):
+        for _ in range(max_retries):
+            protocol.RequestSubmitPart(submission_id, part, data).send(socket)
+            msg, body = protocol.receive_message(socket)
+            message = protocol.restore_message(msg, body)
+
+            if msg == 'operation_failure':
+                if message.error == 'integrity_error':
+                    continue
+            elif msg == 'submit_part_response':
+                if len(data) == message.part_size:
+                    return
+                continue
+            else:
+                raise OperationFailedError(f'Unexpected message code in response: {msg}')
+        raise OperationFailedError(f'Part of file got corrupted during transfer')
+
     def list_all_slices(self):
         """List all slices pushed to the compute node"""
         socket = self.connect(self.address)

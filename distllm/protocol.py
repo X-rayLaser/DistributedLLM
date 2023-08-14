@@ -73,6 +73,46 @@ class ResponsePropagateForward(Message):
 
 
 @dataclass
+class RequestFileSubmissionBegin(Message):
+    msg: ClassVar[str] = "request_file_submission_begin"
+    metadata_json: str
+
+
+@dataclass
+class ResponseFileSubmissionBegin(Message):
+    msg: ClassVar[str] = "file_submission_begin_response"
+    submission_id: int
+
+
+@dataclass
+class RequestSubmitPart(Message):
+    msg: ClassVar[str] = "request_submit_part"
+    submission_id: int
+    part_number: int
+    data: bytes
+
+
+@dataclass
+class ResponseSubmitPart(Message):
+    msg: ClassVar[str] = "submit_part_response"
+    part_size: int
+
+
+@dataclass
+class RequestFileSubmissionEnd(Message):
+    msg: ClassVar[str] = "request_file_submission_end"
+    submission_id: int
+    checksum: str
+
+
+@dataclass
+class ResponseFileSubmissionEnd(Message):
+    msg: ClassVar[str] = "file_submission_end_response"
+    file_name: str
+    total_size: int
+
+
+@dataclass
 class JsonResponseWithStatus(Message):
     msg: ClassVar[str] = "status_response"
     status_json: str

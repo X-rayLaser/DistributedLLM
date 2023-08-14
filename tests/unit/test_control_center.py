@@ -1,8 +1,10 @@
 import unittest
 import json
+from io import BytesIO
 
 from distllm.control_center import ControlCenter, ModelSlice, NodeProvisioningError
 from distllm.control_center import Connection, OperationFailedError
+from distllm import protocol
 from tests.unit.mocks import ComplexServerSocketMock
 
 
@@ -217,6 +219,126 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         for i in range(len(input_tensor)):
             expected_value = response_body['values'][i]
             self.assertAlmostEqual(expected_value, result['values'][i], places=4)
+
+    def test_push_file_succeeds(self):
+        data = b'Hello, World'
+
+        begin_response_body = {
+            'submission_id': 832
+        }
+
+        part_response_body = {
+            'part_size': 4
+        }
+
+        end_response_body = {
+            'file_name': 'funky',
+            'total_size': len(data)
+        }
+
+        self.socket.set_reply_body("request_file_submission_begin", body=begin_response_body)
+        self.socket.set_reply_body("request_submit_part", body=part_response_body)
+        self.socket.set_reply_body("request_file_submission_end", body=end_response_body)
+
+        f = BytesIO(data)
+        result = self.connection.push_file(f, chunk_size=4)
+
+        self.assertEqual(end_response_body, result)
+
+    def test_push_file_succeeds_with_chunk_resubmission(self):
+        data = b'Hello, World'
+
+        begin_response_body = {
+            'submission_id': 832
+        }
+
+        count = 0
+
+        def part_response():
+            nonlocal count
+            count += 1
+            if count < 3:
+                return protocol.ResponseWithError('request_submit_part', 'integrity_error', '')
+
+            return protocol.ResponseSubmitPart(4)
+
+        end_response_body = {
+            'file_name': 'funky',
+            'total_size': len(data)
+        }
+
+        self.socket.set_reply_body("request_file_submission_begin", body=begin_response_body)
+        self.socket.set_reply_function("request_submit_part", part_response)
+        self.socket.set_reply_body("request_file_submission_end", body=end_response_body)
+
+        f = BytesIO(data)
+        result = self.connection.push_file(f, chunk_size=4)
+
+        self.assertEqual(end_response_body, result)
+
+    def test_push_file_fails_on_submission_begin(self):
+        data = b'Hello, World'
+
+        response_body = {
+            'operation': 'request_file_submission_begin',
+            'error': 'Out of memory',
+            'description': ''
+        }
+
+        self.socket.set_error_body("request_file_submission_begin", body=response_body)
+
+        f = BytesIO(data)
+
+        self.assertRaises(OperationFailedError,
+                          lambda: self.connection.push_file(f, chunk_size=4))
+ 
+    def test_push_file_fails_on_submitting_part(self):
+        data = b'Hello, World'
+
+        begin_response_body = {
+            'submission_id': 832
+        }
+
+        part_response_body = {
+            'operation': 'request_submit_part',
+            'error': 'Out of memory',
+            'description': ''
+        }
+
+        self.socket.set_reply_body("request_file_submission_begin", body=begin_response_body)
+        self.socket.set_error_body("request_submit_part", body=part_response_body)
+
+        f = BytesIO(data)
+
+        self.assertRaises(OperationFailedError,
+                    lambda: self.connection.push_file(f, chunk_size=4))
+ 
+    def test_push_file_fails_on_finalization(self):
+        data = b'Hello, World'
+
+        begin_response_body = {
+            'submission_id': 832
+        }
+
+        part_response_body = {
+            'part_size': 4
+        }
+
+        end_response_body = {
+            'operation': 'request_file_submission_end',
+            'error': 'Out of memory',
+            'description': ''
+        }
+
+        self.socket.set_reply_body("request_file_submission_begin", body=begin_response_body)
+        self.socket.set_reply_body("request_submit_part", body=part_response_body)
+        self.socket.set_error_body("request_file_submission_end", body=end_response_body)
+
+        f = BytesIO(data)
+        self.assertRaises(OperationFailedError,
+                          lambda: self.connection.push_file(f, chunk_size=4))
+ 
+
 
 
 if __name__ == '__main__':

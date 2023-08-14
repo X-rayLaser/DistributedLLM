@@ -51,6 +51,8 @@ class ComplexServerSocketMock(StableSocketMock):
         self.errors = {}
         self.responses = {}
 
+        self.response_functions = {}
+
     def sendall(self, buffer):
         super().sendall(buffer)  # store data in the instance attributes
 
@@ -60,13 +62,23 @@ class ComplexServerSocketMock(StableSocketMock):
         message_text = message.get_message()
 
         # use appropriate response message with mocked body from the test code
+        func = self.response_functions.get(message_text)
+        if func:
+            message_out = func()
+            self.data = message_out.encode()
+            self.idx = 0
+            return
+
         error_body_out = self.errors.get(message_text)
 
         response_classes = {
             'slices_request': protocol.JsonResponseWithSlices,
             'status_request': protocol.JsonResponseWithStatus,
             'load_slice_request': protocol.JsonResponseWithLoadedSlice,
-            'propagate_forward_request': protocol.ResponsePropagateForward
+            'propagate_forward_request': protocol.ResponsePropagateForward,
+            'request_file_submission_begin': protocol.ResponseFileSubmissionBegin,
+            'request_submit_part': protocol.ResponseSubmitPart,
+            'request_file_submission_end': protocol.ResponseFileSubmissionEnd
         }
 
         if error_body_out:
@@ -88,3 +100,6 @@ class ComplexServerSocketMock(StableSocketMock):
 
     def set_reply_body(self, msg, body):
         self.responses[msg] = body
+
+    def set_reply_function(self, msg, func):
+        self.response_functions[msg] = func
