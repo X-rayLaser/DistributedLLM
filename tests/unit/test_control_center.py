@@ -165,14 +165,58 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         self.assertEqual(expected, self.connection.load_slice('funky'))
 
     def test_load_slice_unsuccessful(self):
-        expected = {
+        response_body = {
             'operation': 'load_slice',
             'error': 'Brief error',
             'description': 'Details'
         }
-        self.socket.set_error_body("load_slice_request", body=expected)
+        self.socket.set_error_body("load_slice_request", body=response_body)
         self.assertRaises(OperationFailedError,
                           lambda: self.connection.load_slice('funky'))
+
+    def test_propagate_forward_failure(self):
+        response_body = {
+            'operation': 'propagate_forward',
+            'error': 'Out of memory',
+            'description': 'Input tensor was too big'
+        }
+        self.socket.set_error_body("propagate_forward_request", body=response_body)
+
+        self.assertRaises(OperationFailedError,
+                          lambda: self.connection.propagate_forward([32, 32], (1, 2)))
+
+    def test_propagate_forward_other_failure(self):
+        response_body = {
+            'axis0': 10,
+            'axis1': 30,
+            'values': list(range(200))
+        }
+
+        self.socket.set_reply_body("propagate_forward_request", body=response_body)
+
+        shape = [10, 20]
+        tensor_to_send = list(range(200))
+        self.assertRaises(OperationFailedError,
+                          lambda: self.connection.propagate_forward(tensor_to_send, shape))
+
+    def test_propagate_forward_succeeds(self):
+        response_body = {
+            'axis0': 10,
+            'axis1': 20,
+            'values': list(range(200))
+        }
+
+        self.socket.set_reply_body("propagate_forward_request", body=response_body)
+
+        input_tensor = list(range(200))
+        shape = [10, 20]
+        result = self.connection.propagate_forward(input_tensor, tuple(shape))
+
+        self.assertEqual(shape, result['shape'])
+        self.assertEqual(len(input_tensor), len(result['values']))
+        for i in range(len(input_tensor)):
+            expected_value = response_body['values'][i]
+            self.assertAlmostEqual(expected_value, result['values'][i], places=4)
 
 
 if __name__ == '__main__':

@@ -121,8 +121,27 @@ class Connection:
         message = protocol.restore_message(message_text, body)
         return json.loads(message.status_json)
 
-    def propagate_forward(self, tensor):
+    def propagate_forward(self, tensor, shape):
         """Send a tensor to a remote node and propagate it forward through layers of the slice"""
+        socket = self.connect(self.address)
+        axis0, axis1 = shape
+        message_out = protocol.RequestPropagateForward(axis0, axis1, tensor)
+        message_out.send(socket)
+        message_text, body = protocol.receive_message(socket)
+        message = protocol.restore_message(message_text, body)
+        if message.get_message() == "operation_failure":
+            raise OperationFailedError
+        elif message.get_message() == "tensor_response":
+
+            if shape[0] == message.axis0 and shape[1] == message.axis1:
+                return {
+                    'shape': [message.axis0, message.axis1],
+                    'values': message.values
+                }
+            else:
+                raise OperationFailedError
+        else:
+            raise Exception(f'Cannot handle unrecognized message')
 
 
 class OperationFailedError(Exception):

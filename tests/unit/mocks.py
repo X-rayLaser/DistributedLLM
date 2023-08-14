@@ -65,15 +65,12 @@ class ComplexServerSocketMock(StableSocketMock):
         response_classes = {
             'slices_request': protocol.JsonResponseWithSlices,
             'status_request': protocol.JsonResponseWithStatus,
-            'load_slice_request': protocol.JsonResponseWithLoadedSlice
-        }
-
-        error_response_classes = {
-            'load_slice_request': protocol.ResponseWithError
+            'load_slice_request': protocol.JsonResponseWithLoadedSlice,
+            'propagate_forward_request': protocol.ResponsePropagateForward
         }
 
         if error_body_out:
-            message_out_class = error_response_classes[message_text]
+            message_out_class = protocol.ResponseWithError
             message_out = message_out_class(**error_body_out)
         else:
             try:

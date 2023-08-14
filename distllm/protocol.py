@@ -56,11 +56,20 @@ class RequestLoadSlice(Message):
     name: str
 
 
-
-# todo: implement this subclass
 @dataclass
 class RequestPropagateForward(Message):
-    pass
+    msg: ClassVar[str] = "propagate_forward_request"
+    axis0: int
+    axis1: int
+    values: list
+
+
+@dataclass
+class ResponsePropagateForward(Message):
+    msg: ClassVar[str] = "tensor_response"
+    axis0: int
+    axis1: int
+    values: list
 
 
 @dataclass
