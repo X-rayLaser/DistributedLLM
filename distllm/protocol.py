@@ -4,9 +4,22 @@ from typing import ClassVar
 from .utils import encode_length, ByteCoder, ByteCodingError, ByteStreamParser, SocketReader
 
 
-@dataclass
-class Message:
-    msg: ClassVar[str]
+message_registry = {}
+
+
+def register_message_class(cls):
+    message_registry[cls.msg] = cls
+
+
+class Meta(type):
+    def __new__(meta, name, bases, class_dict):
+        cls = type.__new__(meta, name, bases, class_dict)
+        register_message_class(cls)
+        return cls
+
+
+class Message(metaclass=Meta):
+    msg = ""
     
     def send(self, socket):
         body = self.get_body()
@@ -106,20 +119,9 @@ class SliceSubmissionEnd(Message):
 
 
 def restore_message(message, body):
-    if message == 'status_response':
-        return JsonResponseWithStatus(status_json=body['status_json'])
-    elif message == 'slices_list_response':
-        return JsonResponseWithSlices(slices_json=body['slices_json'])
-    elif message == 'slices_request':
-        return RequestAllSlices()
-    elif message == 'status_request':
-        return RequestStatus()
-    elif message == 'load_slice_request':
-        return RequestLoadSlice.from_body(body)
-    elif message == 'loaded_slice_response':
-        return JsonResponseWithLoadedSlice.from_body(body)
-    elif message == 'operation_failure':
-        return ResponseWithError.from_body(body)
+    message_cls = message_registry.get(message)
+    if message_cls:
+        return message_cls.from_body(body)
     else:
         raise Exception(f'Unrecognized message {message}')
 
