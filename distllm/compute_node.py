@@ -89,7 +89,7 @@ class UploadManager:
     def upload_part(self, submission_id, blob) -> int:
         upload = self.id_to_upload.get(submission_id)
         if not upload:
-            raise FileNotFoundError
+            raise UploadNotFoundError
         
         upload.update(blob)
         return len(blob)
@@ -141,6 +141,155 @@ class DebugFileSystemBackend(FileSystemBackend):
             return io.StringIO()
 
 
+class FakeFileTree:
+    def __init__(self, root='/'):
+        self.root = root
+
+        self.tree = {}
+        self.root_dir = {
+            'file': False,
+            'tree': self.tree
+        }
+
+    def make_dirs(self, path):
+        from pathlib import Path
+        parts = Path(path).parts
+
+        if not parts:
+            raise Exception('Empty path')
+
+        def add(tree, rem_dirs):
+            if not rem_dirs:
+                return
+            
+            name, *rem_dirs = rem_dirs
+            
+            if name not in tree:
+                sub_tree = {}
+                tree[name] = {'file': False, 'tree': sub_tree}
+            else:
+                d = tree[name]
+                if d['file']:
+                    raise FileExistsError(name)
+
+                sub_tree = d['tree']
+            add(sub_tree, rem_dirs)
+        
+        add(self.tree, parts)
+
+    def add_file(self, path):
+        from pathlib import Path
+        *dirs, file_name = Path(path).parts
+        
+        dir_path = os.path.join(*dirs) if dirs else ''
+        if not dir_path or dir_path in self.list_dirs():
+            sub_tree = self._get_subdir(dir_path)
+            sub_tree[file_name] = {'file': True, 'data': b''}
+        else:
+            raise FileNotFoundError
+
+    def _get_subdir(self, path):
+        from pathlib import Path
+        parts = Path(path).parts
+
+        sub_tree = self.tree
+        for part in parts:
+            obj = sub_tree[part]
+            sub_tree = obj['tree']
+        return sub_tree
+
+    def exists(self, path):
+        return path in self.list_files() or path in self.list_dirs()
+
+    def list_files(self):
+        paths = []
+        def traverse(name, d, path):
+            current_path = os.path.join(path, name)
+            if d['file']:
+                paths.append(current_path)
+            else:
+                for k, container in d['tree'].items():
+                    traverse(k, container, current_path)
+
+        traverse(self.root, self.root_dir, self.root)
+        return paths
+
+    def list_dirs(self):
+        paths = []
+        def traverse(name, d, path):
+            current_path = os.path.join(path, name)
+            if d['file']:
+                return
+            paths.append(current_path)
+            
+            for k, container in d['tree'].items():
+                traverse(k, container, current_path)
+
+        traverse(self.root, self.root_dir, self.root)
+        
+        if self.root in paths:
+            paths.remove(self.root)
+        return paths
+
+
+class FakeFileSystemBackend(FileSystemBackend):
+    class FakeTextFile:
+        def __init__(self, fs, name, mode):
+            self.name = name
+            self.fs = fs
+            self.buf = b'' if 'b' in mode else ''
+            self.mode = mode
+
+        def read(self, max_chunk=None):
+            return self.fs.files[self.name]
+
+        def write(self, data, max_chunk=None):
+            self.buf += data
+
+        def close(self):
+            self.fs.files[self.name] = self.buf
+
+    def __init__(self):
+        self.file_tree = {
+            'root': {}
+        }
+
+        self.files = {}
+
+    def make_dirs(self, path, exists_ok=False):
+        from pathlib import Path
+
+        node = self.file_tree['root']
+        for part in Path(path).parts:
+            pass
+
+        if not exists_ok:
+            raise FileExistsError
+
+    def open_file(self, path, mode):
+        from pathlib import Path
+
+        parents = Path(path).parents
+        if len(parents) == 1:
+            if mode == "w":
+                self.file_tree['root'] = path
+                self.files[path] = ''
+                return self.FakeTextFile(self, path, mode)
+            elif mode == "r":
+                if path not in self.file_tree['root']:
+                    raise FileNotFoundError
+                return self.FakeTextFile(self, path, mode)
+        else:
+            *dirs, file_name = Path(path).parts
+            
+
+        raise FileNotFoundError
+        if 'b' in mode:
+            return io.BytesIO()
+        else:
+            return io.StringIO()
+
+
 class FunkyNameGenerator:
     def id_to_name(self, submission_id):
         pass
@@ -158,7 +307,6 @@ class UploadRegistry:
 
     def __init__(self, root):
         self.root = root
-        #self.id_to_fh = {}  # maps submission_id to open file handler
         self.in_progress = []  # current active uploads
         self.finished = []
         self.failed = []
@@ -212,7 +360,7 @@ class UploadRegistry:
         try:
             self.in_progress.index(submission_id)
         except ValueError:
-            raise FileNotFoundError
+            raise UploadNotFoundError
 
     def _check_active_upload(self):
         if not self.in_progress:
@@ -256,7 +404,7 @@ class ParallelUploadError(Exception):
     pass
 
 
-class FileNotFoundError(Exception):
+class UploadNotFoundError(Exception):
     pass
 
 

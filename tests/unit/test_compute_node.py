@@ -4,10 +4,11 @@ import json
 import hashlib
 from io import BytesIO
 from distllm.compute_node import (
-    FileUpload, UploadRegistry, UploadManager, DebugFileSystemBackend, TCPHandler
+    FileUpload, UploadRegistry, UploadManager,
+    DebugFileSystemBackend, FakeFileSystemBackend, TCPHandler, FakeFileTree
 )
 from distllm.compute_node import (
-    FailedUploadError, FileNotFoundError, ParallelUploadError, NoActiveUploadError
+    FailedUploadError, UploadNotFoundError, ParallelUploadError, NoActiveUploadError
 )
 from tests.unit import mocks
 from distllm import protocol
@@ -72,7 +73,7 @@ class UploadManagerTests(unittest.TestCase):
         afile_meta = dict(type='any_file')
         submit_id = self.manager.prepare_upload(slice_meta)
         self.assertRaises(ParallelUploadError, lambda: self.manager.prepare_upload(afile_meta))
-        self.assertRaises(FileNotFoundError, lambda: self.manager.upload_part(83, b''))
+        self.assertRaises(UploadNotFoundError, lambda: self.manager.upload_part(83, b''))
 
         self.manager.upload_part(submit_id, b'abcd')
         self.manager.upload_part(submit_id, b'efg')
@@ -115,6 +116,119 @@ class UploadManagerTests(unittest.TestCase):
         self.assertEqual(len(blob3), upload_size2)
         self.assertEqual([id2], self.registry.failed)
         self.assertEqual([id1, id3], self.registry.finished)
+
+
+class FakeFileTreeTests(unittest.TestCase):
+    def test_empty_tree(self):
+        tree = FakeFileTree()
+        self.assertFalse(tree.exists('foo'))
+        self.assertEqual([], tree.list_files())
+        self.assertEqual([], tree.list_dirs())
+
+    def test_adding_a_file_into_missing_folder(self):
+        tree = FakeFileTree()
+        self.assertRaises(FileNotFoundError,
+                          lambda: tree.add_file(os.path.join("foo", "bar.txt")))
+
+    def test_putting_a_file_under_the_root(self):
+        tree = FakeFileTree('')
+
+        self.assertRaises(Exception, lambda: tree.add_file(''))
+
+        tree.add_file("file_name")
+        self.assertEqual(["file_name"], tree.list_files())
+        self.assertEqual([], tree.list_dirs())
+
+    def test_adding_folder_under_root(self):
+        tree = FakeFileTree('')
+
+        self.assertRaises(Exception, lambda: tree.make_dirs(''))
+
+        tree.make_dirs(os.path.join("foo"))
+        self.assertEqual(["foo"], tree.list_dirs())
+
+    def test_adding_nested_folders(self):
+        tree = FakeFileTree('')
+
+        dir1 = "foo"
+        dir2 = os.path.join("foo", "bar")
+        dir3 = os.path.join("foo", "notbar")
+        dir4 = os.path.join("deep", "nested", "folder")
+        dir5 = os.path.join("deep", "dir")
+        tree.make_dirs("foo")
+
+        tree.make_dirs(dir2)
+        self.assertEqual([dir1, dir2], tree.list_dirs())
+
+        tree.make_dirs(dir3)
+        self.assertEqual([dir1, dir2, dir3], tree.list_dirs())
+
+        tree.make_dirs(dir4)
+        expected = [dir1, dir2, dir3, "deep", os.path.join("deep", "nested"),
+                    os.path.join("deep", "nested", "folder")]
+        self.assertEqual(expected, tree.list_dirs())
+
+        tree.make_dirs(dir5)
+
+        expected += [os.path.join("deep", "dir")]
+        self.assertEqual(expected, tree.list_dirs())
+
+    def test_cannot_create_directory_if_there_already_exists_a_file(self):
+        tree = FakeFileTree('')
+
+        tree.add_file('second_file')
+        self.assertRaises(FileExistsError,
+                          lambda: tree.make_dirs(os.path.join('second_file', 'subdir')))
+
+    def test_creating_directory_and_adding_files(self):
+        tree = FakeFileTree('')
+        tree.add_file('first_file')
+        tree.add_file('second_file')
+        tree.make_dirs(os.path.join('somedir', 'subdir'))
+        tree.add_file(os.path.join('somedir', 'third_file'))
+        tree.add_file(os.path.join('somedir', 'subdir', 'fourth_file'))
+
+        expected_files = ['first_file', 'second_file', os.path.join('somedir', 'third_file'),
+                          os.path.join('somedir', 'subdir', 'fourth_file')]
+    
+        self.assertSequenceEqual(set(expected_files), set(tree.list_files()))
+
+    def test_existence_of_folders(self):
+        tree = FakeFileTree('')
+
+        tree.make_dirs(os.path.join("foo", "bar"))
+
+        self.assertTrue(tree.exists("foo"))
+        self.assertTrue(tree.exists(os.path.join("foo", "bar")))
+
+        self.assertFalse(tree.exists("bar"))
+
+
+class FakeFileSystemTests(unittest.TestCase):
+    def test_exceptions(self):
+        fs = FakeFileSystemBackend()
+        self.assertRaises(FileNotFoundError, lambda: fs.open_file("some_file", "r"))
+        self.assertRaises(FileNotFoundError,
+                          lambda: fs.open_file(os.path.join("some_dir", "somefile"), "w"))
+
+        path = os.path.join("some_dir", "subdir")
+        fs.make_dirs(path)
+        self.assertEqual(FileExistsError, lambda: fs.make_dirs(path))
+
+    def test_save_and_read_text_file_under_root(self):
+        fs = FakeFileSystemBackend()
+        f = fs.open_file("myfile", "w")
+        f.write("hello")
+        f.close()
+
+        f = fs.open_file("myfile", "r")
+        self.assertEqual("hello", f.read())
+        f.close()
+
+    def test_save_and_read_text_file_in_directory(self):
+        fs = FakeFileSystemBackend()
+        dir_path = os.path.join("my", "subdirectory")
+        fs.make_dirs(dir_path, exists_ok=True)
 
 
 class SingleUploadTests(unittest.TestCase):
@@ -187,7 +301,7 @@ class UploadRegistryTests(unittest.TestCase):
         self.assertEqual([], self.registry.failed)
         self.assertEqual([], self.registry.finished)
         
-        self.assertRaises(FileNotFoundError, lambda: self.registry.get_location(34))
+        self.assertRaises(UploadNotFoundError, lambda: self.registry.get_location(34))
         self.assertRaises(NoActiveUploadError, lambda: self.registry.mark_finished())
         self.assertRaises(NoActiveUploadError, lambda: self.registry.mark_failed())
 
