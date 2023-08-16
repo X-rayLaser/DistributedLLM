@@ -16,6 +16,10 @@ class StableSocketMock:
         self.data = buffer
         self.idx = 0
 
+    def inject_data(self, buffer):
+        self.data = buffer
+        self.idx = 0
+
 
 class VaryingChunkSocketMock(StableSocketMock):
     def __init__(self):

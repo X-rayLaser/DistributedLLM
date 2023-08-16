@@ -393,6 +393,35 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         self.assertRaises(OperationFailedError,
                           lambda: self.connection.push_file(f, chunk_size=4))
  
+    def test_push_slice_succeeds(self):
+        data = b'Hello, World'
+
+        begin_response_body = {
+            'submission_id': 832
+        }
+
+        part_response_body = {
+            'part_size': 4
+        }
+
+        end_response_body = {
+            'file_name': 'funky',
+            'total_size': len(data)
+        }
+
+        self.socket.set_reply_body("request_file_submission_begin", body=begin_response_body)
+        self.socket.set_reply_body("request_submit_part", body=part_response_body)
+        self.socket.set_reply_body("request_file_submission_end", body=end_response_body)
+
+        f = BytesIO(data)
+        metadata = {"field": "value", "another": 32}
+        result = self.connection.push_slice(f, metadata, chunk_size=4)
+
+        self.assertEqual(end_response_body, result)
+
+
+# todo: test push_slice method
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -86,10 +86,21 @@ class Connection:
         self.address = address
         self.connect = connect
 
-    def push_slice(self, slice, name, layer_range):
+    def push_slice(self, f, model, metadata=None, chunk_size=1024):
         """
         Send a model slice to a remote compute node.
         """
+
+        metadata = metadata or {}
+
+        all_metadata = {
+            'type': 'slice',
+            'model': model
+        }
+
+        all_metadata.update(metadata)
+
+        return self.push_file(f, all_metadata, chunk_size)
 
     def push_file(self, f, metadata=None, chunk_size=1024):
         """
