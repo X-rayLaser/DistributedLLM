@@ -352,7 +352,8 @@ class FakeFileSystemTests(unittest.TestCase):
     def test_save_and_read_text_file_under_root(self):
         fs = FakeFileSystemBackend()
         f = fs.open_file("myfile", "w")
-        f.write("hello")
+        num_bytes = f.write("hello")
+        self.assertEqual(len("hello".encode('utf-8')), num_bytes)
         f.close()
 
         f = fs.open_file("myfile", "r")
@@ -382,7 +383,8 @@ class FakeFileSystemTests(unittest.TestCase):
         data = b'hello'
         file_path = os.path.join(dir_path, 'myfile')
         f = fs.open_file(file_path, "wb")
-        f.write(data)
+        num_bytes = f.write(data)
+        self.assertEqual(len(data), num_bytes)
         f.close()
 
         file_path = os.path.join(dir_path, 'myfile')

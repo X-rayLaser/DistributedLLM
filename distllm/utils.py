@@ -436,6 +436,7 @@ class FakeFileSystemBackend(FileSystemBackend):
             if 'b' not in self.mode:
                 data = data.encode('utf-8')
             self.file_obj['data'] += data
+            return len(data)
 
         def close(self):
             self.closed = True

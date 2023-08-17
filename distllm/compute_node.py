@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from distllm import protocol
 from distllm.protocol import receive_message, restore_message
-from distllm.utils import DefaultFileSystemBackend
+from distllm.utils import FakeFileSystemBackend
 
 
 class TCPHandler:
@@ -66,7 +66,7 @@ class UploadManager:
     def __init__(self, registry):
         self.registry = registry
         self.id_to_upload = {}  # maps submission_id to active uploads
-        self.fs_backend = DefaultFileSystemBackend()
+        self.fs_backend = FakeFileSystemBackend()
 
     def prepare_upload(self, metadata) -> int:
         submission_id = self.registry.add_upload(metadata)
@@ -80,6 +80,7 @@ class UploadManager:
         self.fs_backend.make_dirs(upload_location.dir_path, exists_ok=True)
 
         f = self.fs_backend.open_file(upload_location.metadata_path, "w")
+
         s = json.dumps(metadata)
         f.write(s)
         f.close()
@@ -167,7 +168,7 @@ class UploadRegistry:
         base_path = os.path.join(self.root, sub_dir, f'upload_{submission_id}')
         upload_path = os.path.join(base_path, self.uploaded_file)
         metadata_path = os.path.join(base_path, self.metadata_file)
-        return UploadLocation(self.root, upload_path, metadata_path)
+        return UploadLocation(base_path, upload_path, metadata_path)
 
     def to_json(self):
         return json.dumps(self.__dict__)

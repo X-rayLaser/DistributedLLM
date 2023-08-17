@@ -12,7 +12,7 @@ from distllm.compute_node import (
 )
 from tests.unit import mocks
 from distllm import protocol
-from distllm.utils import DebugFileSystemBackend, receive_data
+from distllm.utils import FakeFileSystemBackend, receive_data
 
 
 class ServerResponseTests(unittest.TestCase):
@@ -50,7 +50,7 @@ class UploadManagerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.registry = UploadRegistry('uploads')
         self.manager = UploadManager(self.registry)
-        self.manager.fs_backend = DebugFileSystemBackend()
+        self.manager.fs_backend = FakeFileSystemBackend()
 
     def test_successful_upload(self):
         metadata = dict(type='slice', model='mymodel')
