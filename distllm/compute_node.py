@@ -2,6 +2,7 @@ import hashlib
 import os
 import json
 from dataclasses import dataclass
+from pathlib import Path
 import io
 from distllm import protocol
 from distllm.protocol import receive_message, restore_message
@@ -152,7 +153,9 @@ class FakeFileTree:
         }
 
     def make_dirs(self, path):
-        from pathlib import Path
+        if self.exists(path):
+            raise FileExistsError
+
         parts = Path(path).parts
 
         if not parts:
@@ -178,116 +181,157 @@ class FakeFileTree:
         add(self.tree, parts)
 
     def add_file(self, path):
-        from pathlib import Path
         *dirs, file_name = Path(path).parts
         
         dir_path = os.path.join(*dirs) if dirs else ''
-        if not dir_path or dir_path in self.list_dirs():
-            sub_tree = self._get_subdir(dir_path)
-            sub_tree[file_name] = {'file': True, 'data': b''}
+        if dir_path:
+            dir_obj = self._find_dir(dir_path)
+            sub_tree = dir_obj['tree']
         else:
+            sub_tree = self.tree
+        
+        if file_name in sub_tree:
+            raise FileExistsError
+
+        sub_tree[file_name] = {'file': True, 'data': b''}
+
+    def _get_object(self, path):
+        parts = Path(path).parts
+        if not parts:
+            raise FileNotFoundError
+        *dirs, file_name = parts
+        sub_tree = self.tree
+        obj = None
+        for part in dirs:
+            obj = sub_tree.get(part)
+            if obj is None or obj['file']:
+                raise FileNotFoundError
+
+            sub_tree = obj['tree']
+
+        try:
+            obj = sub_tree[file_name]
+        except KeyError:
             raise FileNotFoundError
 
-    def _get_subdir(self, path):
-        from pathlib import Path
-        parts = Path(path).parts
+        return obj
 
-        sub_tree = self.tree
-        for part in parts:
-            obj = sub_tree[part]
-            sub_tree = obj['tree']
-        return sub_tree
+    def _find_dir(self, path):
+        obj = self._get_object(path)
+        if obj['file']:
+            raise FileNotFoundError
+
+        return obj
+
+    def find_file(self, path):
+        obj = self._get_object(path)
+        if not obj['file']:
+            raise FileNotFoundError
+
+        return obj
+
+    def write_to_file(self, path, data):
+        obj = self.find_file(path)
+        obj['data'] = data
+
+    def read_file(self, path):
+        obj = self.find_file(path)
+        return obj['data']
 
     def exists(self, path):
+        path = os.path.join(self.root, path)
         return path in self.list_files() or path in self.list_dirs()
 
     def list_files(self):
-        paths = []
+        files, _ = self._list_objects()
+        return files
+
+    def list_dirs(self):
+        _, dirs = self._list_objects()
+        return dirs
+
+    def _list_objects(self):
+        files = []
+        dirs = []
         def traverse(name, d, path):
             current_path = os.path.join(path, name)
             if d['file']:
-                paths.append(current_path)
+                files.append(current_path)
             else:
+                dirs.append(current_path)
+            
                 for k, container in d['tree'].items():
                     traverse(k, container, current_path)
 
-        traverse(self.root, self.root_dir, self.root)
-        return paths
-
-    def list_dirs(self):
-        paths = []
-        def traverse(name, d, path):
-            current_path = os.path.join(path, name)
-            if d['file']:
-                return
-            paths.append(current_path)
-            
-            for k, container in d['tree'].items():
-                traverse(k, container, current_path)
-
-        traverse(self.root, self.root_dir, self.root)
+        traverse(self.root, self.root_dir, '')
         
-        if self.root in paths:
-            paths.remove(self.root)
-        return paths
+        if self.root in files:
+            files.remove(self.root)
+        
+        if self.root in dirs:
+            dirs.remove(self.root)
+        return files, dirs
 
 
 class FakeFileSystemBackend(FileSystemBackend):
-    class FakeTextFile:
-        def __init__(self, fs, name, mode):
-            self.name = name
-            self.fs = fs
-            self.buf = b'' if 'b' in mode else ''
+    class FakeFile:
+        def __init__(self, file_obj, mode):
+            self.file_obj = file_obj
             self.mode = mode
+            self.closed = False
+
+            if mode == 'w' or mode == 'wb':
+                self.file_obj['data'] = b''
 
         def read(self, max_chunk=None):
-            return self.fs.files[self.name]
+            if self.closed:
+                raise ValueError('I/O operation on closed file')
+            
+            if not self.is_readable():
+                raise io.UnsupportedOperation('not readable')
+
+            data = self.file_obj['data']
+            if 'b' in self.mode:
+                return data
+            return data.decode('utf-8')
 
         def write(self, data, max_chunk=None):
-            self.buf += data
+            if self.closed:
+                raise ValueError('I/O operation on closed file')
+        
+            if not self.is_writable():
+                raise io.UnsupportedOperation('not writable')
+
+            if 'b' not in self.mode:
+                data = data.encode('utf-8')
+            self.file_obj['data'] += data
 
         def close(self):
-            self.fs.files[self.name] = self.buf
+            self.closed = True
+
+        def is_readable(self):
+            return 'r' in self.mode
+
+        def is_writable(self):
+            return self.mode == 'r+' or 'w' in self.mode
 
     def __init__(self):
-        self.file_tree = {
-            'root': {}
-        }
-
-        self.files = {}
+        self.file_tree = FakeFileTree()
 
     def make_dirs(self, path, exists_ok=False):
-        from pathlib import Path
-
-        node = self.file_tree['root']
-        for part in Path(path).parts:
-            pass
-
-        if not exists_ok:
-            raise FileExistsError
+        try:
+            self.file_tree.make_dirs(path)
+        except FileExistsError:
+            if not exists_ok:
+                raise
 
     def open_file(self, path, mode):
-        from pathlib import Path
+        if 'w' in mode:
+            if not self.file_tree.exists(path):
+                self.file_tree.add_file(path)
 
-        parents = Path(path).parents
-        if len(parents) == 1:
-            if mode == "w":
-                self.file_tree['root'] = path
-                self.files[path] = ''
-                return self.FakeTextFile(self, path, mode)
-            elif mode == "r":
-                if path not in self.file_tree['root']:
-                    raise FileNotFoundError
-                return self.FakeTextFile(self, path, mode)
-        else:
-            *dirs, file_name = Path(path).parts
-            
-
-        raise FileNotFoundError
-        if 'b' in mode:
-            return io.BytesIO()
-        else:
-            return io.StringIO()
+        file_object = self.file_tree.find_file(path)
+        return self.FakeFile(file_object, mode)
 
 
 class FunkyNameGenerator:

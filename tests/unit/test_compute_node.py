@@ -2,7 +2,7 @@ import unittest
 import os
 import json
 import hashlib
-from io import BytesIO
+from io import BytesIO, UnsupportedOperation
 from distllm.compute_node import (
     FileUpload, UploadRegistry, UploadManager,
     DebugFileSystemBackend, FakeFileSystemBackend, TCPHandler, FakeFileTree
@@ -127,8 +127,12 @@ class FakeFileTreeTests(unittest.TestCase):
 
     def test_adding_a_file_into_missing_folder(self):
         tree = FakeFileTree()
-        self.assertRaises(FileNotFoundError,
-                          lambda: tree.add_file(os.path.join("foo", "bar.txt")))
+        path = os.path.join("foo", "bar.txt")
+        self.assertRaises(FileNotFoundError, lambda: tree.add_file(path))
+        self.assertFalse(tree.exists(path))
+
+        self.assertEqual([], tree.list_files())
+        self.assertEqual([], tree.list_dirs())
 
     def test_putting_a_file_under_the_root(self):
         tree = FakeFileTree('')
@@ -140,12 +144,13 @@ class FakeFileTreeTests(unittest.TestCase):
         self.assertEqual([], tree.list_dirs())
 
     def test_adding_folder_under_root(self):
-        tree = FakeFileTree('')
+        tree = FakeFileTree('/')
 
         self.assertRaises(Exception, lambda: tree.make_dirs(''))
 
         tree.make_dirs(os.path.join("foo"))
-        self.assertEqual(["foo"], tree.list_dirs())
+        self.assertEqual(["/foo"], tree.list_dirs())
+        self.assertTrue(tree.exists("/foo"))
 
     def test_adding_nested_folders(self):
         tree = FakeFileTree('')
@@ -177,8 +182,64 @@ class FakeFileTreeTests(unittest.TestCase):
         tree = FakeFileTree('')
 
         tree.add_file('second_file')
+        path = os.path.join('second_file', 'subdir')
+        self.assertRaises(FileExistsError, lambda: tree.make_dirs(path))
+
+        self.assertFalse(tree.exists(path))
+        self.assertEqual(['second_file'], tree.list_files())
+        self.assertEqual([], tree.list_dirs())
+
+    def test_cannot_create_file_in_place_of_directory(self):
+        tree = FakeFileTree('')
+        tree.make_dirs(os.path.join("foo", "bar"))
         self.assertRaises(FileExistsError,
-                          lambda: tree.make_dirs(os.path.join('second_file', 'subdir')))
+                          lambda: tree.add_file('foo'))
+        self.assertRaises(FileExistsError,
+                          lambda: tree.add_file(os.path.join('foo', 'bar')))
+
+    def test_cannot_create_the_same_file_twice(self):
+        tree = FakeFileTree('')
+        def make_assertions(file_tree):
+            file_tree.make_dirs(os.path.join("foo", "bar"))
+
+            file_tree.add_file(os.path.join('foo', 'bar', 'file.txt'))
+            self.assertRaises(FileExistsError,
+                            lambda: file_tree.add_file(os.path.join('foo', 'bar', 'file.txt')))
+
+        make_assertions(FakeFileTree(''))
+        make_assertions(FakeFileTree('/'))
+        make_assertions(FakeFileTree())
+
+    def test_cannot_create_the_same_folder_twice(self):
+        def make_assertions(file_tree):
+            file_tree.make_dirs(os.path.join("foo", "bar"))
+
+            self.assertTrue(file_tree.exists(os.path.join("foo", "bar")))
+            self.assertRaises(FileExistsError,
+                            lambda: file_tree.make_dirs(os.path.join("foo", "bar")))
+
+        make_assertions(FakeFileTree(''))
+        make_assertions(FakeFileTree('/'))
+        make_assertions(FakeFileTree())
+
+    def test_cannot_write_or_read_non_existing_file(self):
+        tree = FakeFileTree('/')
+        self.assertRaises(FileNotFoundError, lambda: tree.write_to_file('foobar.txt', b'data'))
+        self.assertRaises(FileNotFoundError, lambda: tree.read_file('foobar.txt'))
+
+        tree.make_dirs("foo")
+        path = os.path.join('foo', 'foobar.txt')
+        self.assertRaises(FileNotFoundError, lambda: tree.write_to_file(path, b'data'))
+        self.assertRaises(FileNotFoundError, lambda: tree.read_file(path))
+
+        # cannot read or write to directory
+        self.assertRaises(FileNotFoundError, lambda: tree.write_to_file('foo', b'data'))
+        self.assertRaises(FileNotFoundError, lambda: tree.read_file('foo'))
+
+        path = os.path.join("foo", "bar")
+        tree.make_dirs(path)
+        self.assertRaises(FileNotFoundError, lambda: tree.write_to_file(path, b'data'))
+        self.assertRaises(FileNotFoundError, lambda: tree.read_file(path))
 
     def test_creating_directory_and_adding_files(self):
         tree = FakeFileTree('')
@@ -193,6 +254,17 @@ class FakeFileTreeTests(unittest.TestCase):
     
         self.assertSequenceEqual(set(expected_files), set(tree.list_files()))
 
+    def test_making_directories_and_files_under_different_root(self):
+        tree = FakeFileTree('disk_root')
+        tree.add_file('first_file')
+        tree.make_dirs(os.path.join('somedir', 'subdir'))
+        tree.add_file(os.path.join('somedir', 'subdir', 'second_file'))
+
+        expected = [os.path.join('disk_root', 'first_file'),
+                     os.path.join('disk_root', 'somedir', 'subdir', 'second_file')]
+
+        self.assertSequenceEqual(set(expected), set(tree.list_files()))
+
     def test_existence_of_folders(self):
         tree = FakeFileTree('')
 
@@ -202,6 +274,19 @@ class FakeFileTreeTests(unittest.TestCase):
         self.assertTrue(tree.exists(os.path.join("foo", "bar")))
 
         self.assertFalse(tree.exists("bar"))
+
+    def test_writing_and_reading_files(self):
+        tree = FakeFileTree('')
+
+        tree.make_dirs(os.path.join("foo", "bar"))
+
+        file_path = os.path.join("foo", "bar", "myfile")
+        tree.add_file(file_path)
+
+        tree.write_to_file(file_path, b'hello,')
+        self.assertEqual(b'hello,', tree.read_file(file_path))
+        tree.write_to_file(file_path, b'world!')
+        self.assertEqual(b'world!', tree.read_file(file_path))
 
 
 class FakeFileSystemTests(unittest.TestCase):
@@ -213,7 +298,8 @@ class FakeFileSystemTests(unittest.TestCase):
 
         path = os.path.join("some_dir", "subdir")
         fs.make_dirs(path)
-        self.assertEqual(FileExistsError, lambda: fs.make_dirs(path))
+        fs.make_dirs(path, exists_ok=True)
+        self.assertRaises(FileExistsError, lambda: fs.make_dirs(path))
 
     def test_save_and_read_text_file_under_root(self):
         fs = FakeFileSystemBackend()
@@ -229,6 +315,52 @@ class FakeFileSystemTests(unittest.TestCase):
         fs = FakeFileSystemBackend()
         dir_path = os.path.join("my", "subdirectory")
         fs.make_dirs(dir_path, exists_ok=True)
+
+        file_path = os.path.join(dir_path, 'myfile')
+        f = fs.open_file(file_path, "w")
+        f.write("hello")
+        f.close()
+
+        file_path = os.path.join(dir_path, 'myfile')
+        f = fs.open_file(file_path, "r")
+        self.assertEqual("hello", f.read())
+        f.close()
+
+    def test_save_and_read_binary_file(self):
+        fs = FakeFileSystemBackend()
+        dir_path = os.path.join("my", "subdirectory")
+        fs.make_dirs(dir_path, exists_ok=True)
+
+        data = b'hello'
+        file_path = os.path.join(dir_path, 'myfile')
+        f = fs.open_file(file_path, "wb")
+        f.write(data)
+        f.close()
+
+        file_path = os.path.join(dir_path, 'myfile')
+        f = fs.open_file(file_path, "rb")
+        self.assertEqual(data, f.read())
+        f.close()
+
+    def test_cannot_operate_on_closed_file(self):
+        fs = FakeFileSystemBackend()
+        f = fs.open_file("some_file", "wb")
+        f.close()
+        self.assertRaises(ValueError, lambda: f.write(b'data'))
+
+        f = fs.open_file("some_file", "rb")
+        f.close()
+        self.assertRaises(ValueError, f.read)
+
+    def test_writing_to_file_open_for_reading_and_vice_versa(self):
+        fs = FakeFileSystemBackend()
+        f = fs.open_file("some_file", "w")
+        self.assertRaises(UnsupportedOperation, f.read)
+        f.close()
+        f = fs.open_file("some_file", "rb")
+
+        self.assertRaises(UnsupportedOperation, lambda: f.write(b'data'))
+        f.close()
 
 
 class SingleUploadTests(unittest.TestCase):
