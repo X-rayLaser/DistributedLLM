@@ -17,7 +17,6 @@ from distllm.utils import FakeFileSystemBackend, receive_data
 
 class ServerResponseTests(unittest.TestCase):
     def test_list_slices(self):
-        return
         expected_slices = [{
             'name': 'first slice',
             'model': 'llama_v1',
@@ -33,8 +32,14 @@ class ServerResponseTests(unittest.TestCase):
 
         socket = mocks.StableSocketMock()
 
-        request_handler = TCPHandler(socket)
-        request_handler.manager.fs_backend = DebugFileSystemBackend()
+        names = ['first slice', 'second slice']
+        request_handler = TCPHandler(socket, names)
+        manager = request_handler.manager
+        
+        metadata = dict(type='slice', model='llama_v1', layer_from=0, layer_to=12)
+        self._generate_fake_data(manager, metadata)
+        metadata = dict(type='slice', model='falcon', layer_from=12, layer_to=28)
+        self._generate_fake_data(manager, metadata)
 
         request = protocol.RequestAllSlices()
         request_data = request.encode()
@@ -44,6 +49,11 @@ class ServerResponseTests(unittest.TestCase):
         msg, body = protocol.receive_message(socket)
         message = protocol.restore_message(msg, body)
         self.assertEqual(protocol.JsonResponseWithSlices(slices_json), message)
+
+    def _generate_fake_data(self, manager, metadata):
+        submit_id = manager.prepare_upload(metadata)
+        manager.upload_part(submit_id, b'data')
+        manager.finilize_upload(submit_id, hashlib.sha256(b'data').hexdigest())
 
 
 class UploadManagerTests(unittest.TestCase):

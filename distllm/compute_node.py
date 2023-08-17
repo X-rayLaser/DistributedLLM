@@ -8,10 +8,10 @@ from distllm.utils import FakeFileSystemBackend
 
 
 class TCPHandler:
-    def __init__(self, socket):
+    def __init__(self, socket, funky_names):
         self.registry = UploadRegistry('uploads')
         self.manager = UploadManager(self.registry)
-        self.name_gen = FunkyNameGenerator()
+        self.name_gen = FunkyNameGenerator(funky_names)
         self.socket = socket
 
     def handle(self):
@@ -34,7 +34,7 @@ class TCPHandler:
                 model = metadata['model']
                 layer_from = metadata['layer_from']
                 layer_to = metadata['layer_to']
-                slice_name = self.name_gen.id_to_name[submission_id]
+                slice_name = self.name_gen.id_to_name(submission_id)
                 slices.append(dict(name=slice_name, model=model,
                                    layer_from=layer_from, layer_to=layer_to))
             
@@ -116,11 +116,20 @@ class UploadManager:
 
 
 class FunkyNameGenerator:
+    def __init__(self, names):
+        self.names = names
+
     def id_to_name(self, submission_id):
-        pass
+        try:
+            return self.names[submission_id]
+        except IndexError:
+            return None
 
     def name_to_id(self, name):
-        pass
+        try:
+            return self.index(name)
+        except ValueError:
+            return None
 
 
 class UploadRegistry:
@@ -182,8 +191,9 @@ class UploadRegistry:
         return obj
 
     def _check_index(self, submission_id):
+        all_uploads = self.in_progress + self.failed + self.finished
         try:
-            self.in_progress.index(submission_id)
+            all_uploads.index(submission_id)
         except ValueError:
             raise UploadNotFoundError
 
