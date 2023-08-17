@@ -12,37 +12,17 @@ class TCPHandler:
         self.registry = UploadRegistry('uploads')
         self.manager = UploadManager(self.registry)
         self.name_gen = FunkyNameGenerator(funky_names)
+        self.load_slice = load_slice
         self.socket = socket
 
     def handle(self):
         msg, body = receive_message(self.socket)
         message = restore_message(msg, body)
         if message.get_message() == "slices_request":
-            ids = self.registry.finished
-
-            slices = []
-            for submission_id in ids:
-                location = self.registry.get_location(submission_id)
-                path = location.metadata_path
-                f = self.manager.fs_backend.open_file(path, 'r')
-                s = f.read()
-                f.close()
-                metadata = json.loads(s)
-                if metadata['type'] != 'slice':
-                    continue
-
-                model = metadata['model']
-                layer_from = metadata['layer_from']
-                layer_to = metadata['layer_to']
-                slice_name = self.name_gen.id_to_name(submission_id)
-                slices.append(dict(name=slice_name, model=model,
-                                   layer_from=layer_from, layer_to=layer_to))
-            
-            slices_json = json.dumps(slices)
-            response = protocol.JsonResponseWithSlices(slices_json)
-            response.send(self.socket)
+            self.handle_get_slices(message)
+        elif message.get_message() == "load_slice_request":
+            self.handle_load_slice(message)
         return
-
         if self.prepare_msg():
             metadata = self.get_metadata()
             submission_id = self.manager.prepare_upload(metadata)
@@ -60,6 +40,66 @@ class TCPHandler:
                 pass
             else:
                 name = self.name_gen.id_to_name(submission_id)
+
+    def handle_get_slices(self, message):
+        slices = self.get_slices()
+        slices_json = json.dumps(slices)
+        response = protocol.JsonResponseWithSlices(slices_json)
+        response.send(self.socket)
+
+    def get_slices(self):
+        ids = self.registry.finished
+
+        slices = []
+        for submission_id in ids:
+            location = self.registry.get_location(submission_id)
+            path = location.metadata_path
+            f = self.manager.fs_backend.open_file(path, 'r')
+            s = f.read()
+            f.close()
+            metadata = json.loads(s)
+            if metadata['type'] != 'slice':
+                continue
+
+            model = metadata['model']
+            layer_from = metadata['layer_from']
+            layer_to = metadata['layer_to']
+            slice_name = self.name_gen.id_to_name(submission_id)
+            slices.append(dict(name=slice_name, model=model,
+                                layer_from=layer_from, layer_to=layer_to))
+        return slices
+
+    def handle_load_slice(self, message):
+        slice_name = message.name
+        
+        # todo: simulate operation to load slice
+        slices = self.get_slices()
+        model = None
+        for sl in slices:
+            if sl['name'] == slice_name:
+                model = sl['model']
+                self._find_file_and_load_it(slice_name)
+
+                response = protocol.JsonResponseWithLoadedSlice(
+                    name=slice_name, model=model
+                )
+                response.send(self.socket)
+                return
+
+        response = protocol.ResponseWithError(operation=message.msg, error='slice_not_found', description='')
+        response.send(self.socket)
+
+    def _find_file_and_load_it(self, slice_name):
+        submission_id = self.name_gen.name_to_id(slice_name)
+        location = self.registry.get_location(submission_id)
+        path = location.upload_path
+        f = self.manager.fs_backend.open_file(path, mode='rb')
+        self.load_slice(f)
+        f.close()
+
+
+def load_slice(f):
+    pass
 
 
 class UploadManager:
@@ -127,7 +167,7 @@ class FunkyNameGenerator:
 
     def name_to_id(self, name):
         try:
-            return self.index(name)
+            return self.names.index(name)
         except ValueError:
             return None
 

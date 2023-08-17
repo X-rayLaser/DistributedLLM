@@ -16,7 +16,7 @@ from distllm.utils import FakeFileSystemBackend, receive_data
 
 
 class ServerResponseTests(unittest.TestCase):
-    def test_list_slices(self):
+    def test_list_existing_slices(self):
         expected_slices = [{
             'name': 'first slice',
             'model': 'llama_v1',
@@ -34,12 +34,8 @@ class ServerResponseTests(unittest.TestCase):
 
         names = ['first slice', 'second slice']
         request_handler = TCPHandler(socket, names)
-        manager = request_handler.manager
         
-        metadata = dict(type='slice', model='llama_v1', layer_from=0, layer_to=12)
-        self._generate_fake_data(manager, metadata)
-        metadata = dict(type='slice', model='falcon', layer_from=12, layer_to=28)
-        self._generate_fake_data(manager, metadata)
+        self._upload_slice(request_handler.manager)
 
         request = protocol.RequestAllSlices()
         request_data = request.encode()
@@ -49,6 +45,33 @@ class ServerResponseTests(unittest.TestCase):
         msg, body = protocol.receive_message(socket)
         message = protocol.restore_message(msg, body)
         self.assertEqual(protocol.JsonResponseWithSlices(slices_json), message)
+
+    def test_request_load_slice(self):
+        socket = mocks.StableSocketMock()
+
+        names = ['first slice', 'second slice']
+        request_handler = TCPHandler(socket, names)
+        
+        self._upload_slice(request_handler.manager)
+
+        model = 'falcon'
+        load_slice = 'second slice'
+        request = protocol.RequestLoadSlice(name=load_slice)
+        request_data = request.encode()
+        socket.inject_data(request_data)
+        request_handler.handle()
+
+        msg, body = protocol.receive_message(socket)
+        message = protocol.restore_message(msg, body)
+        self.assertEqual(protocol.JsonResponseWithLoadedSlice(load_slice, model), message)
+
+    def _upload_slice(self, manager):
+        metadata = dict(type='slice', model='llama_v1', layer_from=0, layer_to=12)
+        self._generate_fake_data(manager, metadata)
+        metadata = dict(type='slice', model='falcon', layer_from=12, layer_to=28)
+        self._generate_fake_data(manager, metadata)
+        metadata = dict(type='any_file')
+        self._generate_fake_data(manager, metadata)
 
     def _generate_fake_data(self, manager, metadata):
         submit_id = manager.prepare_upload(metadata)
