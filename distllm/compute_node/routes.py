@@ -1,15 +1,8 @@
 import json
 from distllm import protocol
 
+from .uploads import FailedUploadError
 routes = {}
-
-
-def register(message):
-    def decorator(func):
-        routes[message] = func
-        return func
-
-    return decorator
 
 
 class Meta(type):
@@ -26,6 +19,7 @@ class RequestHandler(metaclass=Meta):
         self.context = context
 
     def __call__(self, message):
+        """Process incoming message and produce reply message"""
         raise NotImplemented
 
 
@@ -35,8 +29,7 @@ class GetAllSlicesHandler(RequestHandler):
     def __call__(self, message):
         slices = self.get_slices()
         slices_json = json.dumps(slices)
-        response = protocol.JsonResponseWithSlices(slices_json)
-        response.send(self.context.socket)
+        return protocol.JsonResponseWithSlices(slices_json)
 
     def get_slices(self):
         ids = self.context.registry.finished
@@ -78,13 +71,10 @@ class LoadSliceHandler(GetAllSlicesHandler):
                 response = protocol.JsonResponseWithLoadedSlice(
                     name=slice_name, model=model
                 )
-                response.send(self.context.socket)
-                return
-
+                return response
 
         # if we got here, that means a given slice wasn't found
-        response = protocol.ResponseWithError(operation=message.msg, error='slice_not_found', description='')
-        response.send(self.context.socket)
+        return protocol.ResponseWithError(operation=message.msg, error='slice_not_found', description='')
 
     def _find_file_and_load_it(self, slice_name):
         submission_id = self.context.name_gen.name_to_id(slice_name)
@@ -118,11 +108,9 @@ class FileSubmissionEndHandler(RequestHandler):
     request_name = "request_file_submission_end"
 
     def __call__(self, message):
-        from distllm import compute_node
-
         try:
             total_size = self.manager.finilize_upload(message.submission_id, message.checksum)
-        except compute_node.FailedUploadError:
+        except FailedUploadError:
             # send corresponding response
             pass
         else:

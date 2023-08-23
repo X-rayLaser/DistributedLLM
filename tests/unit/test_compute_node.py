@@ -4,12 +4,12 @@ import json
 import hashlib
 from io import BytesIO
 from distllm.compute_node import (
-    FileUpload, UploadRegistry, UploadManager,
     TCPHandler
 )
 from distllm.compute_node import (
     FailedUploadError, UploadNotFoundError, ParallelUploadError, NoActiveUploadError
 )
+from distllm.compute_node.uploads import FileUpload, UploadManager, UploadRegistry
 from tests.unit import mocks
 from distllm import protocol
 from distllm.utils import FakeFileSystemBackend, receive_data
