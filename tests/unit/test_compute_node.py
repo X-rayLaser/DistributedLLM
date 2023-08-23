@@ -65,6 +65,24 @@ class ServerResponseTests(unittest.TestCase):
         message = protocol.restore_message(msg, body)
         self.assertEqual(protocol.JsonResponseWithLoadedSlice(load_slice, model), message)
 
+    def test_request_load_non_existing_slice(self):
+        socket = mocks.StableSocketMock()
+
+        names = ['first slice', 'second slice']
+        request_handler = TCPHandler(socket, names)
+        
+        self._upload_slice(request_handler.manager)
+
+        load_slice = 'missing slice'
+        request = protocol.RequestLoadSlice(name=load_slice)
+        request_data = request.encode()
+        socket.inject_data(request_data)
+        request_handler.handle()
+
+        msg, body = protocol.receive_message(socket)
+        message = protocol.restore_message(msg, body)
+        self.assertEqual(protocol.ResponseWithError(request.msg, "slice_not_found", ""), message)
+
     def _upload_slice(self, manager):
         metadata = dict(type='slice', model='llama_v1', layer_from=0, layer_to=12)
         self._generate_fake_data(manager, metadata)
@@ -78,6 +96,8 @@ class ServerResponseTests(unittest.TestCase):
         manager.upload_part(submit_id, b'data')
         manager.finilize_upload(submit_id, hashlib.sha256(b'data').hexdigest())
 
+
+    # todo: test the case when slice load fails
 
 class UploadManagerTests(unittest.TestCase):
     def setUp(self) -> None:

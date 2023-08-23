@@ -146,30 +146,6 @@ class ResponseWithError(Message):
     description: str
 
 
-@dataclass
-class SliceSubmissionBegin(Message):
-    model: str
-    layer_from: int
-    layer_to: int
-
-    @classmethod
-    def from_body(cls, body):
-        cls()
-
-
-@dataclass
-class SliceSubmissionPart(Message):
-    submission_id: int
-    part_id: int
-    data: bytes
-
-
-@dataclass
-class SliceSubmissionEnd(Message):
-    submission_id: int
-    sha256_digest: str
-
-
 def restore_message(message, body):
     message_cls = message_registry.get(message)
     if message_cls:
