@@ -10,9 +10,12 @@ class TCPHandler:
         self.registry = UploadRegistry('uploads')
         self.manager = UploadManager(self.registry)
         self.name_gen = FunkyNameGenerator(funky_names)
-        self.load_slice = load_slice
+        self.slice_loader = SliceLoader()
+        self.tensor_computer = TensorComputer()
+
         self.socket = socket
-        self.context = RequestContext(self.registry, self.manager, self.name_gen)
+        self.context = RequestContext(self.registry, self.manager, self.name_gen,
+                                      self.slice_loader, self.tensor_computer)
 
     def handle(self):
         msg, body = receive_message(self.socket)
@@ -24,8 +27,24 @@ class TCPHandler:
         response.send(self.socket)
 
 
-def load_slice(f):
-    pass
+class SliceLoader:
+    def __call__(self, f):
+        pass
+
+
+class TensorComputer:
+    def __call__(self, tensor):
+        return tensor
+
+
+class FailingSliceLoader(SliceLoader):
+    def __call__(self, f):
+        raise Exception('Something went wrong')
+
+
+class FailingTensorComputer(TensorComputer):
+    def __call__(self, tensor):
+        raise Exception('Seomthing went wrong')
 
 
 @dataclass
@@ -33,3 +52,21 @@ class RequestContext:
     registry: UploadRegistry
     manager: UploadManager
     name_gen: FunkyNameGenerator
+    loader: SliceLoader
+    tensor_computer: TensorComputer
+
+    @classmethod
+    def default(cls, uploads_dir='uploads', names=None):
+        names = names or []
+        registry = UploadRegistry(uploads_dir)
+        manager = UploadManager(registry)
+        name_gen = FunkyNameGenerator(names)
+        loader = SliceLoader()
+        tensor_computer = TensorComputer()
+        return cls(registry, manager, name_gen, loader, tensor_computer)
+
+    @classmethod
+    def with_failing_loader(cls, uploads_dir='uploads', names=None):
+        context = cls.default(uploads_dir, names)
+        context.loader = FailingSliceLoader()
+        return context

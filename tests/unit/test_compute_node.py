@@ -4,12 +4,15 @@ import json
 import hashlib
 from io import BytesIO
 from distllm.compute_node import (
-    TCPHandler
+    TCPHandler, RequestContext
 )
+from distllm.compute_node import routes
 from distllm.compute_node import (
     FailedUploadError, UploadNotFoundError, ParallelUploadError, NoActiveUploadError
 )
-from distllm.compute_node.uploads import FileUpload, UploadManager, UploadRegistry
+from distllm.compute_node.uploads import (
+    FileUpload, UploadManager, UploadRegistry, FunkyNameGenerator
+)
 from tests.unit import mocks
 from distllm import protocol
 from distllm.utils import FakeFileSystemBackend, receive_data
@@ -35,7 +38,7 @@ class ServerResponseTests(unittest.TestCase):
         names = ['first slice', 'second slice']
         request_handler = TCPHandler(socket, names)
         
-        self._upload_slice(request_handler.manager)
+        self._upload_slices(request_handler.manager)
 
         request = protocol.RequestAllSlices()
         request_data = request.encode()
@@ -52,7 +55,7 @@ class ServerResponseTests(unittest.TestCase):
         names = ['first slice', 'second slice']
         request_handler = TCPHandler(socket, names)
         
-        self._upload_slice(request_handler.manager)
+        self._upload_slices(request_handler.manager)
 
         model = 'falcon'
         load_slice = 'second slice'
@@ -71,7 +74,7 @@ class ServerResponseTests(unittest.TestCase):
         names = ['first slice', 'second slice']
         request_handler = TCPHandler(socket, names)
         
-        self._upload_slice(request_handler.manager)
+        self._upload_slices(request_handler.manager)
 
         load_slice = 'missing slice'
         request = protocol.RequestLoadSlice(name=load_slice)
@@ -83,7 +86,153 @@ class ServerResponseTests(unittest.TestCase):
         message = protocol.restore_message(msg, body)
         self.assertEqual(protocol.ResponseWithError(request.msg, "slice_not_found", ""), message)
 
-    def _upload_slice(self, manager):
+    def test_load_slice_results_in_error(self):
+        names = ["first", "second"]
+        context = RequestContext.with_failing_loader(names=names)
+        self._upload_slices(context.manager)
+        handler = routes.LoadSliceHandler(context)
+        
+        request_message = protocol.RequestLoadSlice("first")
+        response_message = handler(request_message)
+        expected = protocol.ResponseWithError(
+            request_message.get_message(), "slice_load_error", ""
+        )
+        self.assertEqual(expected, response_message)
+
+    def test_begin_file_upload_fails(self):
+        context = RequestContext.default()
+        metadata = dict(type='any_file')
+        context.manager.prepare_upload(metadata)
+
+        handler = routes.FileSubmissionBeginHandler(context)
+        
+        request_message = protocol.RequestFileSubmissionBegin(json.dumps(metadata))
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseWithError(request_message.get_message(),
+                                              "parallel_upload_forbidden", "")
+        self.assertEqual(expected, response_message)
+
+    def test_begin_file_upload_succeeds(self):
+        context = RequestContext.default(names=["first", "second"])
+        self._upload_slices(context.manager)
+
+        handler = routes.FileSubmissionBeginHandler(context)
+        
+        metadata = dict(type='any_file')
+        request_message = protocol.RequestFileSubmissionBegin(json.dumps(metadata))
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseFileSubmissionBegin(3)
+        self.assertEqual(expected, response_message)
+
+    def test_upload_file_part_fails_upload_not_found(self):
+        context = RequestContext.default(names=["first", "second"])
+        self._upload_slices(context.manager)
+
+        handler = routes.SubmitPartHandler(context)
+        
+        request_message = protocol.RequestSubmitPart(
+            submission_id=32, part_number=0, data=b'data'
+        )
+
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseWithError(request_message.get_message(),
+                                              error='upload_not_found',
+                                              description='')
+
+        self.assertEqual(expected, response_message)
+
+    def test_upload_file_part_succeeds(self):
+        context = RequestContext.default(names=["first", "second"])
+        metadata = dict(type='any_file')
+        submit_id = context.manager.prepare_upload(metadata)
+
+        handler = routes.SubmitPartHandler(context)
+        
+        data = b'data'
+        request_message = protocol.RequestSubmitPart(
+            submission_id=submit_id, part_number=0, data=data
+        )
+
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseSubmitPart(len(data))
+
+        self.assertEqual(expected, response_message)
+
+    def test_submission_end_fails(self):
+        context = RequestContext.default(names=["first", "second"])
+        
+        metadata = dict(type='any_file')
+        submit_id = context.manager.prepare_upload(metadata)
+        data = b'data'
+        context.manager.upload_part(submit_id, data)
+
+        handler = routes.FileSubmissionEndHandler(context)
+        invalid_checksum = '8239823abc823'
+        request_message = protocol.RequestFileSubmissionEnd(submit_id, invalid_checksum)
+
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseWithError(request_message.get_message(),
+                                              error="file_upload_failed",
+                                              description="")
+
+        self.assertEqual(expected, response_message)
+
+    def test_submission_end_failes_because_of_wrong_id(self):
+        context = RequestContext.default(names=["first", "second"])
+        handler = routes.FileSubmissionEndHandler(context)
+        request_message = protocol.RequestFileSubmissionEnd(834, checksum='')
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseWithError(request_message.get_message(),
+                                              error="upload_not_found",
+                                              description="")
+
+        self.assertEqual(expected, response_message)
+
+    def test_submission_end_fails_because_name_generator_exhausted(self):
+        context = RequestContext.default(names=["first", "second", "third"])
+        self._upload_slices(context.manager)
+        
+        metadata = dict(type='any_file')
+        submit_id = context.manager.prepare_upload(metadata)
+        data = b'data'
+        context.manager.upload_part(submit_id, data)
+
+        checksum = hashlib.sha256(data).hexdigest()
+        request_message = protocol.RequestFileSubmissionEnd(submit_id, checksum)
+
+        handler = routes.FileSubmissionEndHandler(context)
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseWithError(request_message.get_message(),
+                                              error="file_upload_failed",
+                                              description="")
+        self.assertEqual(expected, response_message)
+
+    def test_submission_end_succeeds(self):
+        context = RequestContext.default(names=["first", "second", "third"])
+        
+        metadata = dict(type='any_file')
+        submit_id = context.manager.prepare_upload(metadata)
+
+        data = b'data'
+        context.manager.upload_part(submit_id, data)
+
+        checksum = hashlib.sha256(data).hexdigest()
+        request_message = protocol.RequestFileSubmissionEnd(submit_id, checksum)
+
+        handler = routes.FileSubmissionEndHandler(context)
+        response_message = handler(request_message)
+
+        expected = protocol.ResponseFileSubmissionEnd(file_name="first", total_size=len(data))
+        self.assertEqual(expected, response_message)
+
+    def _upload_slices(self, manager):
         metadata = dict(type='slice', model='llama_v1', layer_from=0, layer_to=12)
         self._generate_fake_data(manager, metadata)
         metadata = dict(type='slice', model='falcon', layer_from=12, layer_to=28)
@@ -96,8 +245,6 @@ class ServerResponseTests(unittest.TestCase):
         manager.upload_part(submit_id, b'data')
         manager.finilize_upload(submit_id, hashlib.sha256(b'data').hexdigest())
 
-
-    # todo: test the case when slice load fails
 
 class UploadManagerTests(unittest.TestCase):
     def setUp(self) -> None:

@@ -1,6 +1,6 @@
 from .uploads import FileUpload, UploadManager, UploadRegistry
 from .tcp_handler import (
-    TCPHandler
+    TCPHandler, RequestContext
 )
 
 from .uploads import (

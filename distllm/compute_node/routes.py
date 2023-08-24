@@ -1,7 +1,7 @@
 import json
 from distllm import protocol
 
-from .uploads import FailedUploadError
+from .uploads import FailedUploadError, ParallelUploadError, UploadNotFoundError
 routes = {}
 
 
@@ -66,7 +66,16 @@ class LoadSliceHandler(GetAllSlicesHandler):
         for sl in slices:
             if sl['name'] == slice_name:
                 model = sl['model']
-                self._find_file_and_load_it(slice_name)
+                f = self._locate_file(slice_name)
+
+                try:
+                    self.context.loader(f)
+                except Exception:
+                    return protocol.ResponseWithError(operation=message.msg,
+                                                      error='slice_load_error',
+                                                      description='')
+                finally:
+                    f.close()
 
                 response = protocol.JsonResponseWithLoadedSlice(
                     name=slice_name, model=model
@@ -76,17 +85,11 @@ class LoadSliceHandler(GetAllSlicesHandler):
         # if we got here, that means a given slice wasn't found
         return protocol.ResponseWithError(operation=message.msg, error='slice_not_found', description='')
 
-    def _find_file_and_load_it(self, slice_name):
+    def _locate_file(self, slice_name):
         submission_id = self.context.name_gen.name_to_id(slice_name)
         location = self.context.registry.get_location(submission_id)
         path = location.upload_path
-        f = self.context.manager.fs_backend.open_file(path, mode='rb')
-        load_slice(f)
-        f.close()
-
-
-def load_slice(f):
-    """load_slice in memory"""
+        return self.context.manager.fs_backend.open_file(path, mode='rb')
 
 
 class FileSubmissionBeginHandler(RequestHandler):
@@ -94,14 +97,26 @@ class FileSubmissionBeginHandler(RequestHandler):
 
     def __call__(self, message):
         metadata = json.loads(message.metadata_json)
-        submission_id = self.context.manager.prepare_upload(metadata)
+        try:
+            submission_id = self.context.manager.prepare_upload(metadata)
+            return protocol.ResponseFileSubmissionBegin(submission_id)
+        except ParallelUploadError:
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="parallel_upload_forbidden",
+                                              description="")
 
 
 class SubmitPartHandler(RequestHandler):
     request_name = "request_submit_part"
 
     def __call__(self, message):
-        num_bytes = self.manager.upload_part(message.submission_id, message.data)
+        try:
+            num_bytes = self.context.manager.upload_part(message.submission_id, message.data)
+            return protocol.ResponseSubmitPart(num_bytes)
+        except UploadNotFoundError:
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="upload_not_found",
+                                              description="")
 
 
 class FileSubmissionEndHandler(RequestHandler):
@@ -109,9 +124,21 @@ class FileSubmissionEndHandler(RequestHandler):
 
     def __call__(self, message):
         try:
-            total_size = self.manager.finilize_upload(message.submission_id, message.checksum)
+            total_size = self.context.manager.finilize_upload(
+                message.submission_id, message.checksum
+            )
+        except FileNotFoundError:
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="upload_not_found",
+                                              description="")
         except FailedUploadError:
-            # send corresponding response
-            pass
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="file_upload_failed",
+                                              description="")
         else:
-            name = self.name_gen.id_to_name(message.submission_id)
+            name = self.context.name_gen.id_to_name(message.submission_id)
+            if not name:
+                return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="file_upload_failed",
+                                              description="")
+            return protocol.ResponseFileSubmissionEnd(name, total_size)
