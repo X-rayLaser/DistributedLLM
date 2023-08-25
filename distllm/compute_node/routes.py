@@ -1,6 +1,6 @@
 import json
 from distllm import protocol
-
+from distllm.compute_node.slices import Tensor, SliceNotLoadedError, NeuralComputationError
 from .uploads import FailedUploadError, ParallelUploadError, UploadNotFoundError
 routes = {}
 
@@ -67,9 +67,10 @@ class LoadSliceHandler(GetAllSlicesHandler):
             if sl['name'] == slice_name:
                 model = sl['model']
                 f = self._locate_file(slice_name)
+                metadata = self._get_metadata(slice_name)
 
                 try:
-                    self.context.loader(f)
+                    self.context.slice_container.load(f, metadata)
                 except Exception:
                     return protocol.ResponseWithError(operation=message.msg,
                                                       error='slice_load_error',
@@ -90,6 +91,17 @@ class LoadSliceHandler(GetAllSlicesHandler):
         location = self.context.registry.get_location(submission_id)
         path = location.upload_path
         return self.context.manager.fs_backend.open_file(path, mode='rb')
+
+    def _get_metadata(self, slice_name):
+        location = self._locate_upload(slice_name)
+        f = self.context.manager.fs_backend.open_file(location.metadata_path, mode='r')
+        metadata_json = f.read()
+        f.close()
+        return json.loads(metadata_json)
+
+    def _locate_upload(self, slice_name):
+        submission_id = self.context.name_gen.name_to_id(slice_name)
+        return self.context.registry.get_location(submission_id)
 
 
 class FileSubmissionBeginHandler(RequestHandler):
@@ -142,3 +154,25 @@ class FileSubmissionEndHandler(RequestHandler):
                                               error="file_upload_failed",
                                               description="")
             return protocol.ResponseFileSubmissionEnd(name, total_size)
+
+
+class PropagateForwardHandler(RequestHandler):
+    request_name = "propagate_forward_request"
+    
+    def __call__(self, message):
+        shape = (message.axis0, message.axis1)
+        tensor = Tensor(shape, message.values)
+
+        try:
+            res_tensor = self.context.slice_container.forward(tensor)
+        except NeuralComputationError:
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="neural_computation_error",
+                                              description="")
+        except SliceNotLoadedError:
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="slice_not_loaded",
+                                              description="")
+        else:
+            axis0, axis1 = res_tensor.shape
+            return protocol.ResponsePropagateForward(axis0, axis1, res_tensor.values)

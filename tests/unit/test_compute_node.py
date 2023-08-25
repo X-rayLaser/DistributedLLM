@@ -4,7 +4,7 @@ import json
 import hashlib
 from io import BytesIO
 from distllm.compute_node import (
-    TCPHandler, RequestContext
+    TCPHandler, RequestContext, FailingSliceContainer
 )
 from distllm.compute_node import routes
 from distllm.compute_node import (
@@ -244,6 +244,66 @@ class ServerResponseTests(unittest.TestCase):
         submit_id = manager.prepare_upload(metadata)
         manager.upload_part(submit_id, b'data')
         manager.finilize_upload(submit_id, hashlib.sha256(b'data').hexdigest())
+
+
+class PropagateForwardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.context = RequestContext.default(names=["first", "second", "third"])
+        self.k, self.b = self._push_dummy_slice(self.context)
+
+
+        self.send_values = [1, 2, 3, 4, 5, 6]
+        self.request_message = protocol.RequestPropagateForward(
+            axis0=2, axis1=3, values=self.send_values
+        )
+
+    def test_cannot_compute_when_no_slice_loaded(self):
+        handler = routes.PropagateForwardHandler(self.context)
+        expected = protocol.ResponseWithError(operation=self.request_message.get_message(),
+                                              error="slice_not_loaded",
+                                              description="")
+
+        response_message = handler(self.request_message)
+        self.assertEqual(expected, response_message)
+
+    def test_propagate_forward_results_in_error(self):
+        self.context.slice_container = FailingSliceContainer()
+
+        handler = routes.PropagateForwardHandler(self.context)
+        expected = protocol.ResponseWithError(operation=self.request_message.get_message(),
+                                              error="neural_computation_error",
+                                              description="")
+
+        response_message = handler(self.request_message)
+        self.assertEqual(expected, response_message)
+
+    def test_compute_tensor(self):
+        message = protocol.RequestLoadSlice("first")
+        handler = routes.LoadSliceHandler(self.context)
+        handler(message)
+
+        handler = routes.PropagateForwardHandler(self.context)
+        response_message = handler(self.request_message)
+
+        expected_values = [self.k * v + self.b for v in self.send_values]
+        expected = protocol.ResponsePropagateForward(
+            axis0=2, axis1=3, values=expected_values
+        )
+
+        self.assertEqual(expected, response_message)
+
+    def _push_dummy_slice(self, context):
+        k = 10
+        b = 150
+        model_data = bytes([k, b])  # computes kx + b elementwise
+        metadata = dict(type='slice', format='test', model='testmodel', layer_from=0, layer_to=0)
+
+        submit_id = context.manager.prepare_upload(metadata)
+        context.manager.upload_part(submit_id, model_data)
+
+        checksum = hashlib.sha256(model_data).hexdigest()
+        context.manager.finilize_upload(submit_id, checksum)
+        return k, b
 
 
 class UploadManagerTests(unittest.TestCase):
