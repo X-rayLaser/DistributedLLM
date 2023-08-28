@@ -4,3 +4,5 @@
 distllm/tensor_processor
 models/
 venv/
+distllm/slice_model
+models_registry/

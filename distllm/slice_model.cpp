@@ -384,16 +384,24 @@ int main(int argc, char ** argv) {
 
         selector = new SelectExtraLayers;
 
-        fname_out = file_name + "_extra_layers.bin";
+        if (argc == 3) {
+            fname_out = file_name + "_extra_layers.bin";
+        } else {
+            fname_out = argv[3];
+        }
         std::cout << "Extracting extra layers from a model " << fname_inp << "\n";
     } else if (command == "slice") {
-        if (argc == 5) {
+        if (argc == 5 || argc == 6) {
             idx_from = atoi(argv[3]);
             idx_to = atoi(argv[4]);
             new_n_layer = idx_to - idx_from + 1;
             selector = new SelectSlice(idx_from, idx_to);
             
-            fname_out = file_name + "_layers_" + std::to_string(idx_from) + "_" + std::to_string(idx_to) + ".bin";
+            if (argc == 5) {
+                fname_out = file_name + "_layers_" + std::to_string(idx_from) + "_" + std::to_string(idx_to) + ".bin";
+            } else {
+                fname_out = argv[5];
+            }
             std::cout << "Taking a slice of a model " << fname_inp << " from " << idx_from << " to " << idx_to << "\n";
         } else {
             std::cout << "Command slice expects arguments model_path, idx_from, idx_to. Got " << argc - 1 << "\n";
