@@ -5,28 +5,24 @@ from distllm.compute_node.slices import SliceContainer, NeuralComputationError, 
 from distllm.compute_node.uploads import FunkyNameGenerator, UploadManager, UploadRegistry
 from distllm.compute_node.uploads import upload_registry, upload_manager
 from distllm.protocol import receive_message, restore_message
+from distllm.utils import FakeFileSystemBackend, DefaultFileSystemBackend
 
 
 class TCPHandler:
-    def __init__(self, socket, funky_names):
-        self.registry = upload_registry
-        self.manager = upload_manager
-        self.name_gen = FunkyNameGenerator(funky_names)
-        self.slice_container = container
+    def __init__(self, socket, context):
         self.socket = socket
-        self.context = RequestContext(upload_registry, upload_manager, self.name_gen,
-                                      self.slice_container)
+        self.context = context
 
     def handle(self):
         msg, body = receive_message(self.socket)
         message = restore_message(msg, body)
-        print("Got message", msg, body)
+        print("Got message", msg)
 
         handler_cls = routes.get(message.get_message())
         handler = handler_cls(self.context)
         response = handler(message)
 
-        print("About to send message", response.get_message(), response.get_body())
+        print("About to send message", response.get_message())
         response.send(self.socket)
 
 
@@ -61,11 +57,24 @@ class RequestContext:
         registry = UploadRegistry(uploads_dir)
         manager = UploadManager(registry)
         name_gen = FunkyNameGenerator(names)
-        slice_container = SliceContainer()
+        fs_backend = FakeFileSystemBackend()
+        manager.fs_backend = fs_backend
+        slice_container = SliceContainer(fs_backend)
         return cls(registry, manager, name_gen, slice_container)
 
     @classmethod
     def with_failing_loader(cls, uploads_dir='uploads', names=None):
         context = cls.default(uploads_dir, names)
-        context.slice_container = FailingSliceContainer()
+        fs_backend = FakeFileSystemBackend()
+        context.slice_container = FailingSliceContainer(fs_backend)
         return context
+
+    @classmethod
+    def production(cls, uploads_dir='uploads', names=None):
+        names = names or []
+        registry = upload_registry
+        manager = upload_manager
+        name_gen = FunkyNameGenerator(names)
+        slice_container = container
+        manager.fs_backend = container.fs_backend
+        return cls(registry, manager, name_gen, slice_container)

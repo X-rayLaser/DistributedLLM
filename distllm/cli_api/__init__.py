@@ -1,11 +1,11 @@
 import argparse
 
 from .base import commands
-from . import (provision, run_node)
+from . import (provision, run_node, status, push_slice, load_slice)
 
 def parse_all_args():
     root_parser = argparse.ArgumentParser(
-        description='A set of tools for training a neural net for handwriting recognition'
+        description='Utilities to work with distributed LLM'
     )
     all_subparsers = root_parser.add_subparsers(dest='command')
 

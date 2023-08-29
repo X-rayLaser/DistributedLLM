@@ -1,3 +1,4 @@
+import os
 from .base import Command
 from ..compute_node.serve import run_server
 
@@ -13,5 +14,8 @@ class RunCommand(Command):
         parser.add_argument('--port', type=int, default=9999,
                             help='Port number')
 
+        parser.add_argument('--uploads_dir', type=str, default='uploads',
+                            help='Home for all uploaded files and model slices')
+
     def __call__(self, args):
-        run_server(args.host, args.port)
+        run_server(args.host, args.port, args.uploads_dir)

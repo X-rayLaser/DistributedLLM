@@ -23,6 +23,22 @@ class RequestHandler(metaclass=Meta):
         raise NotImplemented
 
 
+# todo: unittest this class
+class RequestStatusHandler(RequestHandler):
+    request_name = "status_request"
+
+    def __call__(self, message):
+        container = self.context.slice_container
+        status_dict = {
+            'status': 'up' if container.is_loaded else 'brand_new'
+        }
+
+        if container.is_loaded:
+            status_dict['metadata'] = container.metadata
+        status_json = json.dumps(status_dict)
+        return protocol.JsonResponseWithStatus(status_json)
+
+
 class GetAllSlicesHandler(RequestHandler):
     request_name = "slices_request"
 
@@ -66,18 +82,16 @@ class LoadSliceHandler(GetAllSlicesHandler):
         for sl in slices:
             if sl['name'] == slice_name:
                 model = sl['model']
-                f = self._locate_file(slice_name)
+                file_path = self._locate_file(slice_name)
                 metadata = self._get_metadata(slice_name)
 
                 try:
-                    self.context.slice_container.load(f, metadata)
+                    self.context.slice_container.load(file_path, metadata)
                 except Exception:
                     return protocol.ResponseWithError(operation=message.msg,
                                                       error='slice_load_error',
                                                       description='')
-                finally:
-                    f.close()
-
+ 
                 response = protocol.JsonResponseWithLoadedSlice(
                     name=slice_name, model=model
                 )
@@ -90,6 +104,7 @@ class LoadSliceHandler(GetAllSlicesHandler):
         submission_id = self.context.name_gen.name_to_id(slice_name)
         location = self.context.registry.get_location(submission_id)
         path = location.upload_path
+        return path
         return self.context.manager.fs_backend.open_file(path, mode='rb')
 
     def _get_metadata(self, slice_name):

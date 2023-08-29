@@ -36,9 +36,10 @@ class ServerResponseTests(unittest.TestCase):
         socket = mocks.StableSocketMock()
 
         names = ['first slice', 'second slice']
-        request_handler = TCPHandler(socket, names)
+        context = RequestContext.default(names=names)
+        request_handler = TCPHandler(socket, context)
         
-        upload_slices(request_handler.manager)
+        upload_slices(context.manager)
 
         request = protocol.RequestAllSlices()
         request_data = request.encode()
@@ -53,9 +54,10 @@ class ServerResponseTests(unittest.TestCase):
         socket = mocks.StableSocketMock()
 
         names = ['first slice', 'second slice']
-        request_handler = TCPHandler(socket, names)
+        context = RequestContext.default(names=names)
+        request_handler = TCPHandler(socket, context)
         
-        upload_slices(request_handler.manager)
+        upload_slices(context.manager)
 
         model = 'falcon'
         load_slice = 'second slice'
@@ -72,9 +74,10 @@ class ServerResponseTests(unittest.TestCase):
         socket = mocks.StableSocketMock()
 
         names = ['first slice', 'second slice']
-        request_handler = TCPHandler(socket, names)
+        context = RequestContext.default(names=names)
+        request_handler = TCPHandler(socket, context)
         
-        upload_slices(request_handler.manager)
+        upload_slices(context.manager)
 
         load_slice = 'missing slice'
         request = protocol.RequestLoadSlice(name=load_slice)
@@ -242,7 +245,8 @@ class PropagateForwardTests(unittest.TestCase):
         self.assertEqual(expected, response_message)
 
     def test_propagate_forward_results_in_error(self):
-        self.context.slice_container = FailingSliceContainer()
+        fs_backend = FakeFileSystemBackend()
+        self.context.slice_container = FailingSliceContainer(fs_backend)
 
         handler = routes.PropagateForwardHandler(self.context)
         expected = protocol.ResponseWithError(operation=self.request_message.get_message(),
@@ -255,7 +259,8 @@ class PropagateForwardTests(unittest.TestCase):
     def test_compute_tensor(self):
         message = protocol.RequestLoadSlice("first")
         handler = routes.LoadSliceHandler(self.context)
-        handler(message)
+        res = handler(message)
+        print(res.get_message(), res.get_body())
 
         handler = routes.PropagateForwardHandler(self.context)
         response_message = handler(self.request_message)

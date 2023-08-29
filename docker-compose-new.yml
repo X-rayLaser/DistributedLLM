@@ -9,7 +9,9 @@ services:
       - 9998
     ports:
       - "9998:9998"
-    command: "python -u manager.py run_node --host 0.0.0.0 --port 9998"
+    volumes:
+      - ./distllm:/distllm/
+    command: "python -u manager.py run_node --host 0.0.0.0 --port 9998 --uploads_dir /home/uploads"
 
   node2:
     image: myimage
@@ -19,4 +21,6 @@ services:
       - "9999:9999"
     links:
       - node1
-    command: "python -u manager.py run_node --host 0.0.0.0 --port 9999"
+    volumes:
+      - ./distllm:/distllm/
+    command: "python -u manager.py run_node --host 0.0.0.0 --port 9999 --uploads_dir /home/uploads"

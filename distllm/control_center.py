@@ -1,7 +1,8 @@
 import json
 from dataclasses import dataclass
-from distllm import utils, protocol
 import hashlib
+from tqdm import tqdm
+from distllm import utils, protocol
 
 
 class ControlCenter:
@@ -87,10 +88,12 @@ class Connection:
         self.connect = connect
         self.disconnect = disconnect
 
-    def push_slice(self, f, model, metadata=None, chunk_size=1024):
+    def push_slice(self, f, model, metadata=None, chunk_size=1024*1024, file_size=None, progress_bar=False):
         """
         Send a model slice to a remote compute node.
         """
+
+        # todo: metadata must contain fields: layer_from, layer_to
 
         metadata = metadata or {}
 
@@ -101,9 +104,9 @@ class Connection:
 
         all_metadata.update(metadata)
 
-        return self.push_file(f, all_metadata, chunk_size)
+        return self.push_file(f, all_metadata, chunk_size, file_size, progress_bar)
 
-    def push_file(self, f, metadata=None, chunk_size=1024*1024):
+    def push_file(self, f, metadata=None, chunk_size=1024*1024, file_size=None, progress_bar=False):
         """
         Send a file to a remote compute node
         """
@@ -124,6 +127,8 @@ class Connection:
         part = 0
 
         hasher = hashlib.sha256()
+        if progress_bar:
+            pbar = tqdm(total=file_size, desc='Uploading slice', unit='bytes', unit_scale=True)
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
@@ -134,8 +139,13 @@ class Connection:
 
             self._send_chunk(chunk, submission_id, part, socket)
 
+            if progress_bar:
+                pbar.update(len(chunk))
+
             part += 1
         
+        if progress_bar:
+            pbar.close()
         checksum = hasher.hexdigest()
         message_out = protocol.RequestFileSubmissionEnd(submission_id, checksum)
         socket = self.connect(self.address)
