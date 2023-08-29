@@ -1,0 +1,22 @@
+version: "3"
+services:
+  node1:
+    image: myimage
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - 9998
+    ports:
+      - "9998:9998"
+    command: "python -u manager.py run_node --host 0.0.0.0 --port 9998"
+
+  node2:
+    image: myimage
+    expose:
+      - 9999
+    ports:
+      - "9999:9999"
+    links:
+      - node1
+    command: "python -u manager.py run_node --host 0.0.0.0 --port 9999"

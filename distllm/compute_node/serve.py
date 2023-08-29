@@ -15,12 +15,15 @@ def run_server(host, port):
 
 class MyTCPHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server) -> None:
+        print("Creating instance of MyTCPHandler")
+        funky_names = ["orb", "pranker", "human", "alien", "sorcerer"]
+        self.my_handler = TCPHandler(request, funky_names=funky_names)
         super().__init__(request, client_address, server)
-        #self.my_handler = TCPHandler(self.request)
+
 
     def handle(self):
         funky_names = ["orb", "pranker", "human", "alien", "sorcerer"]
-        self.my_handler = TCPHandler(self.request, funky_names=funky_names)
+        #self.my_handler = TCPHandler(self.request, funky_names=funky_names)
         #self.my_handler.manager.fs_backend = DefaultFileSystemBackend()
         self.my_handler.handle()
 

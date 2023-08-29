@@ -3,7 +3,7 @@
 set -e
 if [ "$ENV" = 'DEV' ]; then
   echo "Running development server"
-  exec python server.py
+  exec python3 /distllm/server.py
 elif [ "$ENV" = 'COMPUTE_NODE' ]; then
   exec python3 -u deploy_node.py
 else

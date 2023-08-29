@@ -193,3 +193,8 @@ class FunkyNameGenerator:
             return self.names.index(name)
         except ValueError:
             return None
+
+
+# singleton objects persistent in memory
+upload_registry = UploadRegistry('uploads')
+upload_manager = UploadManager(upload_registry)

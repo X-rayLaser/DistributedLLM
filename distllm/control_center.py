@@ -85,6 +85,7 @@ class Connection:
     def __init__(self, address):
         self.address = address
         self.connect = connect
+        self.disconnect = disconnect
 
     def push_slice(self, f, model, metadata=None, chunk_size=1024):
         """
@@ -102,11 +103,13 @@ class Connection:
 
         return self.push_file(f, all_metadata, chunk_size)
 
-    def push_file(self, f, metadata=None, chunk_size=1024):
+    def push_file(self, f, metadata=None, chunk_size=1024*1024):
         """
         Send a file to a remote compute node
         """
 
+        # todo: ensure renewing socket before sending each request or make server support keeping connection
+        # todo: always close connection
         socket = self.connect(self.address)
         metadata_json = json.dumps(metadata)
         message_out = protocol.RequestFileSubmissionBegin(metadata_json)
@@ -130,10 +133,12 @@ class Connection:
             hasher.update(chunk)
 
             self._send_chunk(chunk, submission_id, part, socket)
+
             part += 1
         
         checksum = hasher.hexdigest()
         message_out = protocol.RequestFileSubmissionEnd(submission_id, checksum)
+        socket = self.connect(self.address)
         message = self._get_response(message_out, socket)
         
         if message.msg == "operation_failure":
@@ -147,21 +152,27 @@ class Connection:
             raise OperationFailedError(f'Unexpected message code in response: {message.msg}')
 
     def _send_chunk(self, data, submission_id, part, socket, max_retries=3):
+        error_msg = ''
         for _ in range(max_retries):
+            socket = self.connect(self.address)
             message_out = protocol.RequestSubmitPart(submission_id, part, data)
 
             message = self._get_response(message_out, socket)
+
             msg = message.msg
             if msg == 'operation_failure':
                 if message.error == 'integrity_error':
-                    continue
+                    error_msg = 'Part of file got corrupted during transfer'
+                elif message.error == 'upload_not_found':
+                    error_msg = 'Upload not found on the side of the server'
             elif msg == 'submit_part_response':
                 if len(data) == message.part_size:
                     return
                 continue
             else:
                 raise OperationFailedError(f'Unexpected message code in response: {msg}')
-        raise OperationFailedError(f'Part of file got corrupted during transfer')
+        
+        raise OperationFailedError(error_msg)
 
     def list_all_slices(self):
         """List all slices pushed to the compute node"""
@@ -221,3 +232,11 @@ class OperationFailedError(Exception):
 
 def connect(address):
     """Connects to the remote compute node, returns a socket"""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect(address)
+    return sock
+
+
+def disconnect(sock):
+    sock.close()
