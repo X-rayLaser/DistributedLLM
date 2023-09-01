@@ -64,6 +64,8 @@ class GetAllSlicesHandler(RequestHandler):
             model = metadata['model']
             layer_from = metadata['layer_from']
             layer_to = metadata['layer_to']
+            #family = metadata.get('family', 'unknown')
+            
             slice_name = self.context.name_gen.id_to_name(submission_id)
             slices.append(dict(name=slice_name, model=model,
                                 layer_from=layer_from, layer_to=layer_to))

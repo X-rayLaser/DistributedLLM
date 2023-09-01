@@ -1,3 +1,5 @@
+import os
+import json
 import socketserver
 from socketserver import BaseServer
 from .tcp_handler import TCPHandler, RequestContext
@@ -5,10 +7,20 @@ from distllm.utils import DefaultFileSystemBackend
 from distllm.compute_node import uploads
 
 def run_server(host, port, uploads_dir):
-    print("Initialized worker")
+    registry_location = uploads.upload_registry.registry_data_path(uploads_dir)
 
-    uploads.upload_registry.root = uploads_dir
+    if os.path.isfile(registry_location):
+        with open(registry_location) as f:
+            registry_json = f.read()
+        state_dict = json.loads(registry_json)
+        uploads.upload_registry.load_state_dict(state_dict)
+        
+        print("Restored upload registry data from", registry_location)
+    else:
+        uploads.upload_registry.root = uploads_dir
     
+
+    print("Initialized worker")
     with ThreadingTCPServer((host, port), MyTCPHandler) as server:
         server.serve_forever()
 

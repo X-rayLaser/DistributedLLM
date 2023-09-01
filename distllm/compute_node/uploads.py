@@ -40,6 +40,7 @@ class UploadLocation:
 
 
 class UploadRegistry:
+    registry_data_file = "registry_data.json"
     slices_dir = "slices"
     other_dir = "other_files"
 
@@ -86,6 +87,10 @@ class UploadRegistry:
         metadata_path = os.path.join(base_path, self.metadata_file)
         return UploadLocation(base_path, upload_path, metadata_path)
 
+    @classmethod
+    def registry_data_path(cls, root):
+        return os.path.join(root, cls.registry_data_file)
+
     def to_json(self):
         return json.dumps(self.__dict__)
 
@@ -96,6 +101,13 @@ class UploadRegistry:
         obj = cls(root)
         obj.__dict__ = state
         return obj
+
+    def state_dict(self):
+        return self.__dict__.copy()
+
+    def load_state_dict(self, state_dict):
+        self.__dict__ = state_dict.copy()
+        self.id_to_metadata = {int(idx): meta for idx, meta in self.id_to_metadata.items()}
 
     def _check_index(self, submission_id):
         all_uploads = self.in_progress + self.failed + self.finished
@@ -154,6 +166,12 @@ class UploadManager:
             raise
         finally:
             upload.f.close()
+            save_path = self.registry.registry_data_path(self.registry.root)
+            f = self.fs_backend.open_file(save_path, "w")
+            state_dict = self.registry.state_dict()
+            state_json = json.dumps(state_dict)
+            f.write(state_json)
+            f.close()
 
     def get_upload(self, submission_id):
         upload = self.id_to_upload.get(submission_id)
