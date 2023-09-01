@@ -43,18 +43,29 @@ class ProvisionCommand(Command):
             path = d['path']
             ivl_to_path[(a, b)] = path
 
-        return
         for address_str, (a, b) in nodes_map.items():
             ip, port = address_str.split(":")
             address = (ip, int(port))
             connection = Connection(address)
 
-            slice = (int(a), int(b))
-            path = slice_paths[slice]
+            aslice = (int(a), int(b))
+            path = ivl_to_path[aslice]
 
             print(f"Pushing slice '{path}' to '{ip}:{port}'")
+            slice_metadata = metadata.copy()
+            slice_metadata['layer_from'] = a
+            slice_metadata['layer_to'] = b
+
+            file_size = os.path.getsize(path)
             with open(path, "rb") as f:
-                connection.push_slice(f, model=model_id, metadata=metadata)
+                d = connection.push_slice(f, model=model_id, metadata=slice_metadata,
+                                          file_size=file_size, progress_bar=True)
+            
+            slice_name = d['file_name']
+            print("Success")
+
+            res = connection.load_slice(slice_name)
+            print(f'Loaded slice {slice_name} in memory on {ip}:{port}', res)
 
 
 def convert_and_slice_model(model_id, location, partition, metadata):
