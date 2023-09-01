@@ -1,7 +1,7 @@
 import argparse
 
 from .base import commands
-from . import (provision, run_node, status, push_slice, load_slice, list_slices)
+from . import (provision, run_node, status, push_slice, load_slice, list_slices, generate_text)
 
 def parse_all_args():
     root_parser = argparse.ArgumentParser(

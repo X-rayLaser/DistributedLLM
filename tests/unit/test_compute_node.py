@@ -290,9 +290,9 @@ class PropagateForwardTests(unittest.TestCase):
 
 
 def upload_slices(manager):
-    metadata = dict(type='slice', model='llama_v1', layer_from=0, layer_to=12)
+    metadata = dict(type='slice', format='test', model='llama_v1', layer_from=0, layer_to=12)
     generate_fake_data(manager, metadata)
-    metadata = dict(type='slice', model='falcon', layer_from=12, layer_to=28)
+    metadata = dict(type='slice', format='test', model='falcon', layer_from=12, layer_to=28)
     generate_fake_data(manager, metadata)
     metadata = dict(type='any_file')
     generate_fake_data(manager, metadata)

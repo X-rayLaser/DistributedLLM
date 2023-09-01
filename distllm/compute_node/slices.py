@@ -24,7 +24,8 @@ class SliceContainer:
             b = data[1]
             self.slice = DummySlice(k, b)
             return
-        
+
+        self.slice = GGMLSlice(slice_path)
 
     def forward(self, tensor: Tensor):
         if not self.is_loaded:
@@ -65,14 +66,16 @@ class DummySlice(ModelSlice):
 
 class GGMLSlice(ModelSlice):
     def __init__(self, file_path):
+        import llm
         self.path  = file_path
 
-        import llm
-
-        llm.load(self.path)
+        llm.load_slice(self.path)
 
     def __call__(self, tensor: Tensor):
-        return super().__call__(tensor)
+
+        import llm
+        new_values = llm.propagate_forward(tensor.values)
+        return Tensor(tensor.shape, new_values)
 
 
 fs_backend = DefaultFileSystemBackend()
