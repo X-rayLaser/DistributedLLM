@@ -82,6 +82,9 @@ class NodeProvisioningError(Exception):
     pass
 
 
+# todo: connect only once (in init)
+# todo: close method
+# todo: context manager
 class Connection:
     def __init__(self, address):
         self.address = address
