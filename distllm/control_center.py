@@ -204,6 +204,16 @@ class Connection:
             raise OperationFailedError('')
         return message.get_body()
 
+    def clear_context(self):
+        """Remove model keys and values stored in cache"""
+        socket = self.connect(self.address)
+        message_out = protocol.RequestClearContext()
+        message = self._get_response(message_out, socket)
+
+        if message.get_message() == 'operation_failure':
+            raise OperationFailedError('')
+        return message.get_body()
+
     def get_status(self):
         """Receive compute node readiness status and meta information about the slice"""
         socket = self.connect(self.address)

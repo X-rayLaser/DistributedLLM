@@ -32,6 +32,10 @@ class SliceContainer:
             raise SliceNotLoadedError()
         return self.slice(tensor)
 
+    def clear_context(self):
+        if self.is_loaded:
+            self.slice.clear_context()
+
     @property
     def info(self):
         return self.metadata
@@ -51,6 +55,9 @@ class NeuralComputationError(Exception):
 
 class ModelSlice:
     def __call__(self, tensor: Tensor):
+        pass
+
+    def clear_context(self):
         pass
 
 
@@ -76,6 +83,12 @@ class GGMLSlice(ModelSlice):
         import llm
         new_values = llm.propagate_forward(tensor.values)
         return Tensor(tensor.shape, new_values)
+
+    def clear_context(self):
+        import llm
+        res = llm.clear_context()
+        if res != 0:
+            raise Exception("Error occurred when clearing context")
 
 
 fs_backend = DefaultFileSystemBackend()

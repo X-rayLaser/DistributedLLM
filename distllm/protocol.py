@@ -76,6 +76,16 @@ class ResponsePropagateForward(Message):
 
 
 @dataclass
+class RequestClearContext(Message):
+    msg: ClassVar[str] = "clear_context_request"
+
+
+@dataclass
+class ResponseClearContext(Message):
+    msg: ClassVar[str] = "clear_context_response"
+
+
+@dataclass
 class RequestFileSubmissionBegin(Message):
     msg: ClassVar[str] = "request_file_submission_begin"
     metadata_json: str

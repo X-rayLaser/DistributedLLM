@@ -1505,6 +1505,17 @@ class TransformerSlice {
             }
         }
 
+        void clear_context() {
+            n_past = 0;
+            delete ctx;
+            ctx = NULL;
+            auto lparams = llama_context_params_from_gpt_params(params);
+            ctx = my_llama_new_context_with_model(model, lparams);
+            if (ctx == NULL) {
+                fprintf(stderr, "%s: error: failed to recreate context for model '%s'\n", __func__, params.model.c_str());
+            }
+        }
+
         int forward(const std::vector<float>& embeddings, std::vector<float>& res) {
             int n_embd = get_n_embd();
 
@@ -1867,7 +1878,7 @@ std::vector<float> get_llm_output(std::string extra_layers_path, const std::vect
         logits_offset = n_vocab * (N - 1);
     }
 
-    std::cout << "IN get_llm_output: logits_total IS " << logits_total << std::endl;
+    //std::cout << "IN get_llm_output: logits_total IS " << logits_total << std::endl;
     logits_out.resize(logits_total);
     memcpy(logits_out.data(), (float *) ggml_get_data(res) + logits_offset, sizeof(float) * logits_total);
 
@@ -1993,6 +2004,27 @@ load_slice(PyObject *self, PyObject *args) {
     std::string slice_path(cstr_path);
     
     slice = new TransformerSlice(slice_path, params, n_threads);
+
+    return PyLong_FromLong(0);
+}
+
+
+static PyObject *
+clear_context(PyObject *self, PyObject *args) {
+    std::cout << "in clear context" << std::endl;
+    if (slice) {
+        slice->clear_context();
+        std::cout << "cleared context" << std::endl;
+    }
+
+    return PyLong_FromLong(0);
+}
+
+static PyObject *
+unload_slice(PyObject *self, PyObject *args) {
+    if (slice) {
+        delete slice;
+    }
 
     return PyLong_FromLong(0);
 }
@@ -2134,9 +2166,10 @@ static PyObject *
 get_logits(PyObject *self, PyObject *args) {
     const char* extra_layers_path_cstr;
     PyObject *embeddings_list;
+    bool all_logits;
     
     //todo: add option to specify whether to return logits per all input embeddings
-    if (!PyArg_ParseTuple(args, "sO", &extra_layers_path_cstr, &embeddings_list))
+    if (!PyArg_ParseTuple(args, "sOp", &extra_layers_path_cstr, &embeddings_list, &all_logits))
         return NULL;
 
     std::string extra_layers_path(extra_layers_path_cstr);    
@@ -2147,8 +2180,8 @@ get_logits(PyObject *self, PyObject *args) {
         return NULL;
     }
 
-    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings, true);
-    std::cout << "IN GET_LOGITS: LOGITS.SIZE() IS " << logits.size() << std::endl;
+    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings, all_logits);
+    //std::cout << "IN GET_LOGITS: LOGITS.SIZE() IS " << logits.size() << std::endl;
     PyObject* result = PyList_New(logits.size());
 
     for (size_t i = 0; i < logits.size(); i++)
@@ -2157,7 +2190,6 @@ get_logits(PyObject *self, PyObject *args) {
         PyObject* python_value = Py_BuildValue("f", value);
         PyList_SetItem(result, i, python_value);
     }
-
     return result;
 }
 
@@ -2206,6 +2238,10 @@ decode_token(PyObject *self, PyObject *args) {
 static PyMethodDef SpamMethods[] = {
      {"load_slice",  load_slice, METH_VARARGS,
      "Load all transformer block layers in the slice"},
+     {"unload_slice", unload_slice, METH_VARARGS,
+     "Unload slice currently loaded in memory"},
+     {"clear_context", clear_context, METH_VARARGS,
+     "Clear cached keys and values"},
      {"tokenize_prompt", tokenize_prompt, METH_VARARGS,
      "Convert text prompt into a list of tokens"},
      {"prepare_embeddings", prepare_embeddings, METH_VARARGS,

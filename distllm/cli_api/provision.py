@@ -60,12 +60,8 @@ class ProvisionCommand(Command):
             with open(path, "rb") as f:
                 d = connection.push_slice(f, model=model_id, metadata=slice_metadata,
                                           file_size=file_size, progress_bar=True)
-            
-            slice_name = d['file_name']
-            print("Success")
 
-            res = connection.load_slice(slice_name)
-            print(f'Loaded slice {slice_name} in memory on {ip}:{port}', res)
+            print("Success")
 
 
 def convert_and_slice_model(model_id, location, partition, metadata):

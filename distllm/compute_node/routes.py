@@ -193,3 +193,16 @@ class PropagateForwardHandler(RequestHandler):
         else:
             axis0, axis1 = res_tensor.shape
             return protocol.ResponsePropagateForward(axis0, axis1, res_tensor.values)
+
+
+class ClearContextHandler(RequestHandler):
+    request_name = "clear_context_request"
+
+    def __call__(self, message):
+        try:
+            self.context.slice_container.clear_context()
+            return protocol.ResponseClearContext()
+        except Exception as e:
+            return protocol.ResponseWithError(operation=message.get_message(),
+                                              error="clear_context_failure",
+                                              description=repr(e))
