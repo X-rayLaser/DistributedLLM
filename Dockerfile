@@ -2,6 +2,10 @@ FROM python:3.9
 
 RUN apt-get update && apt-get install build-essential -y
 
+ADD requirements.txt /requirements.txt
+
+RUN pip install -r /requirements.txt
+
 COPY vendor /vendor
 
 COPY distllm /distllm
@@ -10,6 +14,7 @@ RUN mkdir /libs
 
 WORKDIR /vendor/llama.cpp
 
+RUN make clean
 RUN make libllama.so && make libembdinput.so
 RUN cp libllama.so /libs/libllama.so && cp libembdinput.so /libs/libembdinput.so
 
@@ -22,17 +27,17 @@ RUN g++ -fPIC -I /vendor/llama.cpp/examples -I /vendor/llama.cpp -o slice_model 
 
 RUN groupadd -r uwsgi && useradd -r -g uwsgi uwsgi
 
-COPY requirements.txt /requirements.txt
-
-RUN pip install -r /requirements.txt
-
 EXPOSE 9090 9191 5000
 
 COPY cmd.sh /
 
 COPY manager.py /
 
-RUN chown uwsgi /home
+RUN chown uwsgi:uwsgi /home
+
+RUN mkdir /models_registry
+
+RUN chown uwsgi:uwsgi /models_registry
 
 USER uwsgi
 

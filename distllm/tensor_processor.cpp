@@ -23,6 +23,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
 #define LLAMA_MAX_SCRATCH_BUFFERS 16
 
 
@@ -1985,10 +1989,6 @@ int main(int argc, char ** argv) {
     return 0;
 }
 
-
-#define PY_SSIZE_T_CLEAN
-#include <Python.h>
-
 TransformerSlice *slice;
 
 
@@ -2166,7 +2166,7 @@ static PyObject *
 get_logits(PyObject *self, PyObject *args) {
     const char* extra_layers_path_cstr;
     PyObject *embeddings_list;
-    bool all_logits;
+    int all_logits;
     
     //todo: add option to specify whether to return logits per all input embeddings
     if (!PyArg_ParseTuple(args, "sOp", &extra_layers_path_cstr, &embeddings_list, &all_logits))
@@ -2180,7 +2180,7 @@ get_logits(PyObject *self, PyObject *args) {
         return NULL;
     }
 
-    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings, all_logits);
+    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings, (bool) all_logits);
     //std::cout << "IN GET_LOGITS: LOGITS.SIZE() IS " << logits.size() << std::endl;
     PyObject* result = PyList_New(logits.size());
 

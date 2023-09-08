@@ -10,8 +10,8 @@ services:
     ports:
       - "9998:9998"
     volumes:
-      - ./models:/distllm/models
-    command: "python -u deploy_node.py --host 0.0.0.0 --port 9998 ./models/open_llama_3b_ggml-model-q4_0_layers_0_12.bin"
+      - ./distllm:/distllm/
+    command: "python -u manager.py run_node --host 0.0.0.0 --port 9998 --uploads_dir /home/uploads"
 
   node2:
     image: myimage
@@ -19,21 +19,8 @@ services:
       - 9999
     ports:
       - "9999:9999"
-    volumes:
-      - ./models:/distllm/models
     links:
       - node1
-    command: "python -u deploy_node.py --host 0.0.0.0 --port 9999 ./models/open_llama_3b_ggml-model-q4_0_layers_13_25.bin"
-
-  distllm-server:
-    image: myimage
-    environment:
-      ENV: DEV
     volumes:
       - ./distllm:/distllm/
-      - ./models:/models
-    ports:
-      - "5000:5000"
-    links:
-      - node1
-      - node2
+    command: "python -u manager.py run_node --host 0.0.0.0 --port 9999 --uploads_dir /home/uploads"

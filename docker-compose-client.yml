@@ -1,0 +1,14 @@
+version: "3"
+services:
+  client:
+    image: myimage
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./models:/models
+      - registry:/models_registry
+      - ./configs:/configs
+
+volumes:
+  registry:
