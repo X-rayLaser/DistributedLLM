@@ -156,6 +156,16 @@ class ResponseWithError(Message):
     description: str
 
 
+@dataclass
+class RequestGreeting(Message):
+    msg: ClassVar[str] = "greeting_request"
+
+
+@dataclass
+class ResponseGreeting(Message):
+    msg: ClassVar[str] = "greeting_response"
+
+
 def restore_message(message, body):
     message_cls = message_registry.get(message)
     if message_cls:
