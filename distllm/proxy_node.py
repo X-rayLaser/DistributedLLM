@@ -13,6 +13,8 @@ def run_proxy(host, client_port, node_port):
     thread = ServerThread(host, node_port)
     thread.start()
 
+    print("Started server thread")
+
     with ThreadingTCPServer((host, client_port), FromClientToProxy) as server:
         server.serve_forever()
 
@@ -22,7 +24,7 @@ def run_proxy(host, client_port, node_port):
 
 class ServerThread(Thread):
     def __init__(self, host, port):
-        super.__init__()
+        super().__init__()
         self.host = host
         self.port = port
 
@@ -33,8 +35,7 @@ class ServerThread(Thread):
 
 class FromProxyToComputeNodeHandler(socketserver.BaseRequestHandler):
     def handle(self):
-        sock = self.request
-        self.handshake(sock)
+        self.handshake()
 
         try:
             self.exchange_messages_forever()
@@ -57,7 +58,7 @@ class FromProxyToComputeNodeHandler(socketserver.BaseRequestHandler):
 
         message = protocol.restore_message(msg, body)
         if message == protocol.RequestGreeting():
-            response = message
+            response = protocol.ResponseGreeting()
         else:
             response = protocol.ResponseWithError(operation=message.get_message(),
                                                   error='wrong_greeting', description='')

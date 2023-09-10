@@ -16,7 +16,7 @@ class RunCommand(Command):
         parser.add_argument('--uploads_dir', type=str, default='uploads',
                             help='Home for all uploaded files and model slices')
 
-        parser.add_argument('--reverse', type=bool, default=False, action='store_true',
+        parser.add_argument('--reverse', default=False, action='store_true',
                             help='Connect to a given address from here, then serve')
 
     def __call__(self, args):
