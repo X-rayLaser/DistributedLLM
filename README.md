@@ -1,26 +1,53 @@
 # Introduction
 
-# Main components
+The repository provides a set of tools to distribute a given LLM among available machines/devices. This is useful when the model is too large to run on a single machine (for instance, it does not fit in RAM). Users simply need to provide their own LLM and configure the system using a small configuration file; the toolkit handles the rest.
 
-Compute node is an element of the network that stores a slice of a model (a subset of transformer layers). It's mainly responsible for processing tensors. It takes a tensor, propagates it forward through it's subset of layers, and returns output tensor. Multiple compute nodes can be deployed on a single machine.
+This project builds on top of llama.cpp project. Therefore, it naturally supports scripts for converting the model to GGML format and quantizing it.
 
-Server machine is a physical machine/device that deploys a compute node.
+Here is the approach in the nutshell:
+- split the model into pieces
+- send each piece to a dedicated machine and load it in memory (RAM/VRAM)
+- connect all machines in a network
+- propagate tensors forward through the layers of the first piece, propagate resulting tensor through the layers of the second piece, and so on
+
+Supported devices:
+- CPU
+- GPU (will come later)
+
+Supported Models:
+- LLaMA (version 1)
+- OpenLLaMA (version 1)
+
+Note that currently the toolkit does not suport LLaMA version 2. The same goes for OpenLLaMA. This support will be added in the future. 
+
+# Status: early stage
+
+This project is still under development and may have bugs or limitations. Use it on your own risk.
+
+
+# 1. Main components
+
+Compute node is an element of the network that stores a slice of a model (a subset of transformer layers). It takes a tensor, propagates it forward through it's subset of layers, and returns output tensor. Multiple compute nodes can be deployed on a single machine.
+
+Server machine is a physical machine/device that runs a compute node.
 
 Client node is an element of the network that establishes connection with compute nodes, queries their status, provisions them, and, finally, uses them for running inference on LLM.
 
 Client machine is a machine that runs a client node.
 
-# The workflow
-1. Decide how many machines should be used to distribted LLM between them
+
+# 2. The workflow
+1. Decide how many machines should be used to distribte LLM between them
 
 2. On each server machine, clone this repository and deploy a compute node on there
 
 3. On the client machine:
-- obtain an LLM model and create a small and simple configuration file
-- run provision command which will automatically prepare a chosen model, split it into pieces and send those pieces to their corresponding compute nodes
-- generate text
+- obtain a model and create a small and simple configuration file
+- run provision command
+- generate text using the LLM distributed on your network
 
-# Quick start
+
+# 3. Quick start
 
 ## Cloning the repository:
 
@@ -73,6 +100,8 @@ sudo docker-compose -f docker-compose-prod.yml up
 
 ## Provisioning
 
+Provisioning will automatically prepare a chosen model, split it into pieces and send those pieces to their corresponding compute nodes.
+
 This subsection describes the steps required on the client machine, which is the one that will be used to interact with the distributed LLM.
 
 Create a directory "models" in the root directory of the repository:
@@ -124,7 +153,7 @@ sudo docker-compose -f docker-compose-client.yml run client python3 manager.py g
 
 Replace <config_file> with the path to your configuration file. The --prompt flag specifies the input prompt, while the --num-tokens flag determines the number of generated tokens. Additionally, the --temp flag controls temperature scaling, and the --rp flag adjusts repetition penalty. Feel free to experiment with different values to achieve desired results.
 
-# Installation without docker
+# 4. Installation without docker
 
 It is advisable to use a virtual environment when installing Python dependencies. On Ubuntu, you can create and activate a virtual environment using the following commands:
 ```
