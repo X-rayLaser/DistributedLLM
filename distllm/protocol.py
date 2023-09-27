@@ -40,7 +40,14 @@ class Message(metaclass=Meta):
 
     @classmethod
     def from_body(cls, body):
-        return cls(**body)
+        keep_alive = 'keep_alive'
+        if keep_alive in body:
+            del body[keep_alive]
+            res = cls(**body)
+            setattr(res, keep_alive, keep_alive)
+        else:
+            res = cls(**body)
+        return res
 
 
 @dataclass
@@ -129,10 +136,6 @@ class ResponseFileSubmissionEnd(Message):
 class JsonResponseWithStatus(Message):
     msg: ClassVar[str] = "status_response"
     status_json: str
-
-    @classmethod
-    def from_body(cls, body):
-        return cls(**body)
 
 
 @dataclass

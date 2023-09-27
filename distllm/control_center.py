@@ -1,4 +1,5 @@
 import json
+import socket
 from dataclasses import dataclass
 import hashlib
 from tqdm import tqdm
@@ -88,8 +89,10 @@ class NodeProvisioningError(Exception):
 class Connection:
     def __init__(self, address):
         self.address = address
+
+        self._socket = None
         self.connect = connect
-        self.disconnect = disconnect
+        #self.disconnect = disconnect
 
     def push_slice(self, f, model, metadata=None, chunk_size=1024*1024, file_size=None, progress_bar=False):
         """
@@ -116,10 +119,10 @@ class Connection:
 
         # todo: ensure renewing socket before sending each request or make server support keeping connection
         # todo: always close connection
-        socket = self.connect(self.address)
+        sock = self._get_socket()
         metadata_json = json.dumps(metadata)
         message_out = protocol.RequestFileSubmissionBegin(metadata_json)
-        message = self._get_response(message_out, socket)
+        message = self._get_response(message_out, sock)
 
         if message.msg == "operation_failure":
             raise OperationFailedError
@@ -140,7 +143,7 @@ class Connection:
             total_bytes_read += len(chunk)
             hasher.update(chunk)
 
-            self._send_chunk(chunk, submission_id, part, socket)
+            self._send_chunk(chunk, submission_id, part)
 
             if progress_bar:
                 pbar.update(len(chunk))
@@ -151,8 +154,8 @@ class Connection:
             pbar.close()
         checksum = hasher.hexdigest()
         message_out = protocol.RequestFileSubmissionEnd(submission_id, checksum)
-        socket = self.connect(self.address)
-        message = self._get_response(message_out, socket)
+        sock = self._get_socket()
+        message = self._get_response(message_out, sock)
         
         if message.msg == "operation_failure":
             raise OperationFailedError
@@ -164,13 +167,13 @@ class Connection:
         else:
             raise OperationFailedError(f'Unexpected message code in response: {message.msg}')
 
-    def _send_chunk(self, data, submission_id, part, socket, max_retries=3):
+    def _send_chunk(self, data, submission_id, part, max_retries=3):
         error_msg = ''
         for _ in range(max_retries):
-            socket = self.connect(self.address)
+            sock = self._get_socket()
             message_out = protocol.RequestSubmitPart(submission_id, part, data)
 
-            message = self._get_response(message_out, socket)
+            message = self._get_response(message_out, sock)
 
             msg = message.msg
             if msg == 'operation_failure':
@@ -189,16 +192,16 @@ class Connection:
 
     def list_all_slices(self):
         """List all slices pushed to the compute node"""
-        socket = self.connect(self.address)
+        sock = self._get_socket()
         message_out = protocol.RequestAllSlices()
-        message = self._get_response(message_out, socket)
+        message = self._get_response(message_out, sock)
         return json.loads(message.slices_json)
 
     def load_slice(self, name):
         """Load to memory a model slice with a given name"""
-        socket = self.connect(self.address)
+        sock = self._get_socket()
         message_out = protocol.RequestLoadSlice(name=name)
-        message = self._get_response(message_out, socket)
+        message = self._get_response(message_out, sock)
         
         if message.get_message() == 'operation_failure':
             raise OperationFailedError('')
@@ -206,9 +209,9 @@ class Connection:
 
     def clear_context(self):
         """Remove model keys and values stored in cache"""
-        socket = self.connect(self.address)
+        sock = self._get_socket()
         message_out = protocol.RequestClearContext()
-        message = self._get_response(message_out, socket)
+        message = self._get_response(message_out, sock)
 
         if message.get_message() == 'operation_failure':
             raise OperationFailedError('')
@@ -216,18 +219,18 @@ class Connection:
 
     def get_status(self):
         """Receive compute node readiness status and meta information about the slice"""
-        socket = self.connect(self.address)
+        sock = self._get_socket()
         message_out = protocol.RequestStatus()
-        message = self._get_response(message_out, socket)
+        message = self._get_response(message_out, sock)
         return json.loads(message.status_json)
 
     def propagate_forward(self, tensor, shape):
         """Send a tensor to a remote node and propagate it forward through layers of the slice"""
-        socket = self.connect(self.address)
+        sock = self._get_socket()
         axis0, axis1 = shape
         message_out = protocol.RequestPropagateForward(axis0, axis1, tensor)
 
-        message = self._get_response(message_out, socket)
+        message = self._get_response(message_out, sock)
 
         if message.get_message() == "operation_failure":
             raise OperationFailedError
@@ -244,9 +247,15 @@ class Connection:
             raise Exception(f'Cannot handle unrecognized message')
 
     def _get_response(self, request, socket):
+        request.keep_alive = True
         request.send(socket)
         message_text, body = protocol.receive_message(socket)
         return protocol.restore_message(message_text, body)
+
+    def _get_socket(self):
+        if self._socket is None:
+            self._socket = self.connect(self.address)
+        return self._socket
 
 
 class OperationFailedError(Exception):
@@ -268,7 +277,6 @@ class ReusableConnection:
 
 def connect(address):
     """Connects to the remote compute node, returns a socket"""
-    import socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect(address)
     return sock

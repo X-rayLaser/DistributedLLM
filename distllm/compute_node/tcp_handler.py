@@ -9,11 +9,9 @@ from distllm.utils import FakeFileSystemBackend, DefaultFileSystemBackend
 
 
 class TCPHandler:
-    def __init__(self, socket, context, keep_listening=False):
+    def __init__(self, socket, context):
         self.socket = socket
         self.context = context
-
-        self.keep_listening = keep_listening
 
     def handle(self):
         while True:
@@ -28,8 +26,10 @@ class TCPHandler:
             print("About to send message", response.get_message())
             response.send(self.socket)
 
-            if not self.keep_listening:
+            if not hasattr(message, "keep_alive"):
+                print("Quitting handle")
                 break
+            print("Keeping alive")
 
 
 class SliceLoader:

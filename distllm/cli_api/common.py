@@ -91,6 +91,8 @@ class DistributedLLM:
         self.addresses = addresses
         self.extra_layers_path = extra_layers_path
 
+        self.connections = [Connection(address) for address in addresses]
+
     def generate(self, prompt, max_steps=200, temperature=0.0, repeat_penalty=1.1):
         self.clear_context()
         extra_layers_path = self.extra_layers_path
@@ -141,14 +143,12 @@ class DistributedLLM:
         return np.exp(nll / num_tokens_out)
 
     def clear_context(self):
-        for host_with_port in self.addresses:
-            connection = Connection(host_with_port)
+        for connection in self.connections:
             connection.clear_context()
 
     def propagate_tensor(self, embeddings):
         shape = (1, len(embeddings))
-        for host_with_port in self.addresses:
-            connection = Connection(host_with_port)
+        for connection in self.connections:
             res = connection.propagate_forward(embeddings, shape)
             embeddings = res['values']
         return embeddings

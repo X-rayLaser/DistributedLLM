@@ -71,7 +71,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
         context = RequestContext.production(uploads_dir='/distllm/uploads', names=funky_names)
         #context.registry.root = '/home/uploads'
-        self.my_handler = TCPHandler(request, context, keep_listening=False)
+        self.my_handler = TCPHandler(request, context)
         super().__init__(request, client_address, server)
 
     def handle(self):

@@ -9,6 +9,6 @@ services:
       - ./models:/models
       - registry:/models_registry
       - ./configs:/configs
-
+      - ./distllm:/distllm/
 volumes:
   registry:
