@@ -9,21 +9,27 @@ from distllm.utils import FakeFileSystemBackend, DefaultFileSystemBackend
 
 
 class TCPHandler:
-    def __init__(self, socket, context):
+    def __init__(self, socket, context, keep_listening=False):
         self.socket = socket
         self.context = context
 
+        self.keep_listening = keep_listening
+
     def handle(self):
-        msg, body = receive_message(self.socket)
-        message = restore_message(msg, body)
-        print("Got message", msg)
+        while True:
+            msg, body = receive_message(self.socket)
+            message = restore_message(msg, body)
+            print("Got message", msg)
 
-        handler_cls = routes.get(message.get_message())
-        handler = handler_cls(self.context)
-        response = handler(message)
+            handler_cls = routes.get(message.get_message())
+            handler = handler_cls(self.context)
+            response = handler(message)
 
-        print("About to send message", response.get_message())
-        response.send(self.socket)
+            print("About to send message", response.get_message())
+            response.send(self.socket)
+
+            if not self.keep_listening:
+                break
 
 
 class SliceLoader:

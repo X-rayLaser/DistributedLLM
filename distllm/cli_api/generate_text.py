@@ -1,4 +1,5 @@
 import json
+import time
 from .base import Command
 from ..control_center import Connection
 from ..compute_node.slices import Tensor
@@ -29,9 +30,15 @@ class GenerateTextCommand(Command):
     def __call__(self, args):
         distributed_llm = get_llm(args.config)
 
+        start = time.time()
+        n = 0
         for token_str in distributed_llm.generate(args.prompt, args.num_tokens,
                                                   temperature=args.temp, repeat_penalty=args.rp):
             s = token_str
+            n += 1
             print(f'{s}', end='', flush=True)
 
+        elapsed = time.time() - start
+        speed = n / elapsed
         print()
+        print(f"Generated {n} tokens in {elapsed:.2f} seconds. Average generation speed {speed:.2f} tokens/sec")

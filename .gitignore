@@ -8,3 +8,5 @@ venv/
 debugging.py
 distllm/slice_model
 models_registry/
+docker-compose-proxy.yml
+docker-compose-temp.yml

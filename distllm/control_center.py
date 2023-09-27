@@ -253,6 +253,19 @@ class OperationFailedError(Exception):
     pass
 
 
+class ReusableConnection:
+    def __init__(self):
+        self.socket = None
+
+    def __call__(self, address):
+        print("Calling connect")
+        import socket
+        if self.socket is None:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.connect(address)
+        return self.socket
+
+
 def connect(address):
     """Connects to the remote compute node, returns a socket"""
     import socket

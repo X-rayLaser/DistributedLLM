@@ -1,13 +1,12 @@
 FROM python:3.9
 
 ADD requirements.txt /requirements.txt
+RUN pip install -r /requirements.txt
 
 COPY vendor /vendor
 COPY distllm /distllm
 COPY cmd.sh /
 COPY manager.py /
-
-RUN pip install -r /requirements.txt
 
 WORKDIR /vendor/llama.cpp
 
