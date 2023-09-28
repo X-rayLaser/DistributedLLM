@@ -1714,38 +1714,98 @@ std::vector<llama_vocab::id> llama_tokenize(const llama_vocab & vocab, const std
 }
 
 
-std::vector<float> get_inputs(std::string extra_layers_path, const llama_token * tokens, int n_tokens, int n_threads) {
-    //std::cout << "enter get_inputs\n";
-    llama_model_loader loader(extra_layers_path, false);
+class LLMExtra {
+    private:
+        llama_buffer weight_buf;
+        uint32_t n_embd;
+        uint32_t n_vocab;
+        llama_model_loader* loader;
 
-    auto n_embd = loader.file_loader->hparams.n_embd;
-    auto n_vocab = loader.file_loader->hparams.n_vocab;
+        struct ggml_tensor* tok_embeddings;
+        struct ggml_tensor* norm_weight;
+        struct ggml_tensor* output_weight;
 
-    //size_t buf_size = 32000 * 4096; //about 100 MB
+        struct ggml_tensor* load_tensor(const std::string & name, const std::vector<uint32_t> & ne) {
+            struct ggml_tensor * tensor = loader->get_tensor(name, ne, GGML_BACKEND_CPU);
+            auto it = loader->tensors_map.name_to_idx.find(name);
+
+
+            llama_load_tensor & lt = loader->tensors_map.tensors.at(it->second);
+            lt.data = (uint8_t *) tensor->data;
+            loader->load_data_for(lt);
+            return tensor;
+        }
+    public:
+        LLMExtra(std::string extra_layers_path)
+        {
+            loader = new llama_model_loader(extra_layers_path, false);
+            tok_embeddings = NULL;
+            norm_weight = NULL;
+            output_weight = NULL;
+            n_embd = loader->file_loader->hparams.n_embd;
+            n_vocab = loader->file_loader->hparams.n_vocab;
+
+            size_t ctx_size;
+            size_t mmapped_size;
+            loader->calc_sizes(&ctx_size, &mmapped_size);
+
+            size_t buf_size = ctx_size;
+            weight_buf.resize(buf_size);
+
+            struct ggml_init_params weight_params = {
+                /*.mem_size   =*/ weight_buf.size,
+                /*.mem_buffer =*/ weight_buf.addr,
+                /*.no_alloc   =*/ false,
+            };
+            struct ggml_context * weight_ctx = ggml_init(weight_params);
+
+            loader->ggml_ctx = weight_ctx;
+        }
+
+        void load_layers() {
+            tok_embeddings = load_tensor("tok_embeddings.weight", {n_embd, n_vocab});
+            norm_weight = load_tensor("norm.weight", {n_embd});
+            output_weight = load_tensor("output.weight", {n_embd, n_vocab});
+        }
+
+        llama_vocab get_vocab() const {
+            return loader->file_loader->vocab;
+        }
+
+        uint32_t get_n_embd() const {
+            return n_embd;
+        }
+
+        uint32_t get_n_vocab() const {
+            return n_vocab;
+        }
+
+        struct ggml_tensor* get_token_embeddings() const {
+            return tok_embeddings;
+        }
+
+        struct ggml_tensor* get_norm_weight() const {
+            return norm_weight;
+        }
+
+        struct ggml_tensor* get_output_weight() const {
+            return output_weight;
+        }
+
+        ~LLMExtra() {
+            ggml_free(loader->ggml_ctx);
+            delete loader;
+        }
+};
+
+
+std::vector<float> get_inputs(const LLMExtra* llm_extra, const llama_token * tokens, int n_tokens, int n_threads) {
+    struct ggml_tensor * tok_embeddings = llm_extra->get_token_embeddings();
+
+    //this buffer used to store tokens is way to large than it needs to be (n_tokens * 4 bytes should be enough)
+    auto n_embd = llm_extra->get_n_embd();
+    auto n_vocab = llm_extra->get_n_vocab();
     size_t buf_size = n_vocab * n_embd;
-
-    llama_buffer weight_buf;
-    weight_buf.resize(buf_size);
-
-    //std::cout << "Allocated memory \n";
-    struct ggml_init_params weight_params = {
-        /*.mem_size   =*/ weight_buf.size,
-        /*.mem_buffer =*/ weight_buf.addr,
-        /*.no_alloc   =*/ false,
-    };
-    struct ggml_context * weight_ctx = ggml_init(weight_params);
-
-    loader.ggml_ctx = weight_ctx;
-
-    //std::cout << "About to load tok embeddings\n";
-    struct ggml_tensor * tok_embeddings = loader.get_tensor("tok_embeddings.weight", {n_embd, n_vocab}, GGML_BACKEND_CPU);
-    auto it = loader.tensors_map.name_to_idx.find("tok_embeddings.weight");
-    llama_load_tensor & lt = loader.tensors_map.tensors.at(it->second);
-    lt.data = (uint8_t *) tok_embeddings->data;
-    loader.load_data_for(lt);
-
-    //std::cout << "got_tok embeddings\n";
-    //std::cout << "ndims" << tok_embeddings->n_dims << ", rows " << tok_embeddings->ne[0] << ", cols " << tok_embeddings->ne[1] << "\n";
 
     llama_buffer buf;
     buf.resize(buf_size);    
@@ -1761,6 +1821,7 @@ std::vector<float> get_inputs(std::string extra_layers_path, const llama_token *
     std::vector<uint8_t> work_buffer;
 
     struct ggml_tensor * inp_tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
+
     memcpy(inp_tokens->data, tokens, n_tokens * ggml_element_size(inp_tokens));
     ggml_set_name(inp_tokens, "inp_tokens");
 
@@ -1779,54 +1840,22 @@ std::vector<float> get_inputs(std::string extra_layers_path, const llama_token *
     memcpy(inputs.data(), (float *) ggml_get_data(res), sizeof(float)*n_embd * n_tokens);
     
     ggml_free(ctx0);
-    ggml_free(weight_ctx);
     return inputs;
 }
 
 
-std::vector<float> get_llm_output(std::string extra_layers_path, const std::vector<float>& embeddings,
+std::vector<float> get_llm_output(const LLMExtra* llm_extra, const std::vector<float>& embeddings,
                                   bool all_logits=false) {
-    llama_model_loader loader(extra_layers_path, false);
-
-    auto n_embd = loader.file_loader->hparams.n_embd;
-    auto n_vocab = loader.file_loader->hparams.n_vocab;
+    auto n_embd = llm_extra->get_n_embd();
+    auto n_vocab = llm_extra->get_n_vocab();
     auto N = (int) (embeddings.size() / n_embd);
 
-    size_t ctx_size;
-    size_t mmapped_size;
-    loader.calc_sizes(&ctx_size, &mmapped_size);
-
-    llama_buffer weight_buf;
-    weight_buf.resize(ctx_size);
-
-    //std::cout << "Allocated memory \n";
-    struct ggml_init_params weight_params = {
-        /*.mem_size   =*/ weight_buf.size,
-        /*.mem_buffer =*/ weight_buf.addr,
-        /*.no_alloc   =*/ false,
-    };
-    struct ggml_context * weight_ctx = ggml_init(weight_params);
-
-    loader.ggml_ctx = weight_ctx;
-
     //std::cout << "About to load tok weights\n";
-    struct ggml_tensor * norm_matrix = loader.get_tensor("norm.weight", {n_embd}, GGML_BACKEND_CPU);
-    {
-        auto it = loader.tensors_map.name_to_idx.find("norm.weight");
-        llama_load_tensor & lt = loader.tensors_map.tensors.at(it->second);
-        lt.data = (uint8_t *) norm_matrix->data;
-        loader.load_data_for(lt);
-    }
+    struct ggml_tensor * norm_matrix = llm_extra->get_norm_weight();
+    struct ggml_tensor * output_matrix = llm_extra->get_output_weight();
 
-    struct ggml_tensor * output_matrix = loader.get_tensor("output.weight", {n_embd, n_vocab}, GGML_BACKEND_CPU);
-    {
-        auto it = loader.tensors_map.name_to_idx.find("output.weight");
-        llama_load_tensor & lt = loader.tensors_map.tensors.at(it->second);
-        lt.data = (uint8_t *) output_matrix->data;
-        loader.load_data_for(lt);
-    }
-
-    size_t buf_size = ctx_size + 1000 * 10000;
+    //what's the proper way to calculate the memory requirement here
+    size_t buf_size = 10000 * 10000;
     llama_buffer buf;
     buf.resize(buf_size);
     struct ggml_init_params params = {
@@ -1887,12 +1916,11 @@ std::vector<float> get_llm_output(std::string extra_layers_path, const std::vect
     memcpy(logits_out.data(), (float *) ggml_get_data(res) + logits_offset, sizeof(float) * logits_total);
 
     ggml_free(ctx0);
-    ggml_free(weight_ctx);
     return logits_out;
 }
 
-llama_token sample_next_token(std::string extra_layers_path, const std::vector<float>& embeddings) {
-    std::vector<float> logits_out = get_llm_output(extra_layers_path, embeddings);
+llama_token sample_next_token(const LLMExtra* llm_extra, const std::vector<float>& embeddings) {
+    std::vector<float> logits_out = get_llm_output(llm_extra, embeddings);
     
     float max_value = -(1000000000000.0);
     llama_token token_id = 0;
@@ -1907,89 +1935,16 @@ llama_token sample_next_token(std::string extra_layers_path, const std::vector<f
     return token_id;
 }
 
-
-int main(int argc, char ** argv) {
-    gpt_params params;
-
-    if (gpt_params_parse(argc, argv, params) == false) {
-        return 1;
-    }
-
-    std::string prompt = params.prompt;
-
-    std::vector<llama_token> embd_inp;
-
-    std::vector<llama_token> tokens;
-
-    std::string slice1_path = "./models/open_llama_7b_ggml-model-q4_0_layers_0_15.bin";
-    std::string slice2_path = "./models/open_llama_7b_ggml-model-q4_0_layers_16_31.bin";
-    
-    int n_threads = params.n_threads;
-    std::cout << "n_threads " << n_threads << "\n";
-    TransformerSlice slice1(slice1_path, params, n_threads);
-    TransformerSlice slice2(slice2_path, params, n_threads);
-
-
-    llama_vocab vocab = slice1.get_vocab();
-    
-    tokens = llama_tokenize(vocab, prompt, true);
-
-    std::cout << "tokens, total " << tokens.size() << "\n";
-    for (llama_token t: tokens) {
-        std::cout << t << " ";
-    }
-
-    //todo: finish the inference (add lm_head (output) layer, use it, sample from the output layer and detokenize)
-
-    std::cout << "about to prepare embeddings\n";
-    std::vector<float> temp_res;
-    
-    //int n_embd = slice2.get_n_embd();
-    int n_embd = slice1.get_n_embd();
-    int n_vocab = slice1.get_n_vocab();
-    std::cout << "n_embdd:" << n_embd << "\n";
-
-    printf("%s", prompt.c_str());
-    fflush(stdout);
-    for (int t = 0; t < 200; t++) {
-        std::vector<float> embeddings = get_inputs("./models/open_llama_7b_ggml-model-q4_0_extra_layers.bin", tokens.data(), tokens.size(), n_threads);
-
-        int status1 = slice1.forward(embeddings, temp_res);
-        if (status1 != 0) {
-            std::cout << "something went wrong1\n";
-            return status1;
-        }
-    
-        //std::cout << "done slice1 " << temp_res.size() << " " << temp_res[temp_res.size() - 1] << "\n";
-
-        std::vector<float> tmp = temp_res;
-
-        int status2 = slice2.forward(tmp, temp_res);
-        if (status2 != 0) {
-            std::cout << "something went wrong2\n";
-            return status2;
-        }
-        //std::cout << "done slice2 " << temp_res.size() << " " << temp_res[temp_res.size() - 1] << "\n";
-        //std::cout << "done step " << t << "\n";
-
-        llama_token next_token = sample_next_token("./models/open_llama_7b_ggml-model-q4_0_extra_layers.bin", temp_res);
-
-        if (next_token >= n_vocab) {
-            std::cout << "token out of bounds: " << next_token << "\n";
-        }
-
-        printf("%s", vocab.id_to_token[next_token].tok.c_str());
-        fflush(stdout);
-
-        //std::cout << vocab.id_to_token[next_token].tok.c_str() << "\n";
-        tokens.clear();
-        tokens.push_back(next_token);
-    }
-
-    return 0;
-}
-
 TransformerSlice *slice;
+LLMExtra* llm_extra = NULL;
+
+
+void load_llm_extra(std::string extra_layer_path) {
+    if (llm_extra == NULL) {
+        llm_extra = new LLMExtra(extra_layer_path);
+        llm_extra->load_layers();
+    }
+}
 
 
 static PyObject *
@@ -2037,11 +1992,11 @@ tokenize_prompt(PyObject *self, PyObject *args) {
         return NULL;
     
     std::string prompt = prompt_cstr;
-    llama_load_tensors_map tensors_map;
-    my_file_loader loader(extra_layers_path, tensors_map);
+    std::string llm_extra_path = extra_layers_path;
+    load_llm_extra(llm_extra_path);
 
-    llama_vocab vocab = loader.vocab;
-    std::cout << "prompt is " << prompt << "\n";
+    llama_vocab vocab = llm_extra->get_vocab();
+
     std::vector<llama_token> tokens = llama_tokenize(vocab, prompt, true);    
 
     PyObject* result = PyList_New(tokens.size());
@@ -2064,7 +2019,7 @@ prepare_embeddings(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "sO", &extra_layer_path_cstr, &tokens_list))
         return NULL;
     
-    std::string extra_layer_path(extra_layer_path_cstr);
+    std::string extra_layers_path(extra_layer_path_cstr);
     PyObject *iter = PyObject_GetIter(tokens_list);
     if (!iter) {
         return NULL;
@@ -2086,7 +2041,8 @@ prepare_embeddings(PyObject *self, PyObject *args) {
     }
 
     const int n_threads = 3;
-    std::vector<float> embeddings = get_inputs(extra_layer_path, tokens.data(), tokens.size(), n_threads);
+    load_llm_extra(extra_layers_path);
+    std::vector<float> embeddings = get_inputs(llm_extra, tokens.data(), tokens.size(), n_threads);
 
     PyObject* result = PyList_New(embeddings.size());
 
@@ -2180,7 +2136,8 @@ get_logits(PyObject *self, PyObject *args) {
         return NULL;
     }
 
-    std::vector<float> logits = get_llm_output(extra_layers_path, embeddings, (bool) all_logits);
+    load_llm_extra(extra_layers_path);
+    std::vector<float> logits = get_llm_output(llm_extra, embeddings, (bool) all_logits);
     //std::cout << "IN GET_LOGITS: LOGITS.SIZE() IS " << logits.size() << std::endl;
     PyObject* result = PyList_New(logits.size());
 
@@ -2210,7 +2167,8 @@ llm_get_next_token(PyObject *self, PyObject *args) {
         return NULL;
     }
 
-    llama_token next_token = sample_next_token(extra_layers_path, embeddings);
+    load_llm_extra(extra_layers_path);
+    llama_token next_token = sample_next_token(llm_extra, embeddings);
 
     return PyLong_FromLong(static_cast<int>(next_token));
 }
@@ -2224,11 +2182,10 @@ decode_token(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "si", &extra_layers_path, &token_id))
         return NULL;
     
-
-    llama_load_tensors_map tensors_map;
-    my_file_loader loader(extra_layers_path, tensors_map);
-
-    llama_vocab vocab = loader.vocab;
+    std::string extra_layers_path_string = extra_layers_path;
+    load_llm_extra(extra_layers_path_string);
+    
+    llama_vocab vocab = llm_extra->get_vocab();
 
     std::string tok = vocab.id_to_token[token_id].tok;
     return PyUnicode_FromString(tok.c_str());

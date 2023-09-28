@@ -83,7 +83,6 @@ class NodeProvisioningError(Exception):
     pass
 
 
-# todo: connect only once (in init)
 # todo: close method
 # todo: context manager
 class Connection:
@@ -245,6 +244,9 @@ class Connection:
                 raise OperationFailedError
         else:
             raise Exception(f'Cannot handle unrecognized message')
+
+    def close(self):
+        """Close an open socket"""
 
     def _get_response(self, request, socket):
         request.keep_alive = True
