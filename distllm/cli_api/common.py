@@ -94,7 +94,7 @@ class DistributedLLM:
 
         self.connections = [Connection(address) for address in addresses]
 
-    def generate(self, prompt, max_steps=200, temperature=0.0, repeat_penalty=1.1):
+    def generate(self, prompt, max_steps=200, temperature=0.0, repeat_penalty=1.1, n_threads=2):
         self.clear_context()
         extra_layers_path = self.extra_layers_path
         tokens = llm.tokenize_prompt(extra_layers_path, prompt)
@@ -104,25 +104,25 @@ class DistributedLLM:
         for _ in range(max_steps):
             t1 = time.time()
             embeddings = llm.prepare_embeddings(extra_layers_path, tokens)
-            #print(f"Prepare embedding took {time.time() - t1:.3f} seconds")
+            print(f"Prepare embedding took {time.time() - t1:.3f} seconds")
 
             t2 = time.time()
-            embeddings = self.propagate_tensor(embeddings)
-            #print(f"propagate_tensor took {time.time() - t2:.3f} seconds")
+            embeddings = self.propagate_tensor(embeddings, n_threads)
+            print(f"propagate_tensor took {time.time() - t2:.3f} seconds")
 
             t3 = time.time()
             logits = llm.get_logits(extra_layers_path, embeddings, all_logits)
-            #print(f"get_logits took {time.time() - t3:.3f} seconds")
+            print(f"get_logits took {time.time() - t3:.3f} seconds")
 
             t4 = time.time()
             token_id = sampler(logits)
-            #print(f"sampler took {time.time() - t4:.3f} seconds")
+            print(f"sampler took {time.time() - t4:.3f} seconds")
 
             t5 = time.time()
             token_str = llm.decode_token(extra_layers_path, token_id)
 
-            #print(f"decode_token took {time.time() - t5:.3f} seconds")
-            #print()
+            print(f"decode_token took {time.time() - t5:.3f} seconds")
+            print()
             
             tokens.clear()
             tokens.append(token_id)
@@ -162,9 +162,9 @@ class DistributedLLM:
         for connection in self.connections:
             connection.clear_context()
 
-    def propagate_tensor(self, embeddings):
+    def propagate_tensor(self, embeddings, n_threads):
         shape = (1, len(embeddings))
         for connection in self.connections:
-            res = connection.propagate_forward(embeddings, shape)
+            res = connection.propagate_forward(embeddings, shape, n_threads)
             embeddings = res['values']
         return embeddings

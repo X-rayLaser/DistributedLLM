@@ -54,6 +54,7 @@ SOFTWARE.
 #include <mutex>
 #include <sstream>
 #include <numeric>
+#include <chrono>
 
 static llama_context ** g_ctx;
 
@@ -1489,16 +1490,13 @@ class TransformerSlice {
     std::string slice_path;
     gpt_params params;
     int n_past;
-    int n_threads;
 
     llama_model * model;
     llama_context * ctx;
     public:
-        TransformerSlice(std::string slice_path, gpt_params params, int n_threads) {
+        TransformerSlice(std::string slice_path, gpt_params params) {
             this->slice_path = slice_path;
             this->params = params;
-            this->n_threads = n_threads;
-
             this->params.model = slice_path;
 
             n_past = 0;
@@ -1520,16 +1518,23 @@ class TransformerSlice {
             }
         }
 
-        int forward(const std::vector<float>& embeddings, std::vector<float>& res) {
+        int forward(const std::vector<float>& embeddings, std::vector<float>& res, int n_threads) {
             int n_embd = get_n_embd();
 
             int N = (int) (embeddings.size() / n_embd);
             //std::cout << "N is " << N << "\n";
             //int N = n_past + 1;
+
+            std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
             if (!llama_eval_internal(*ctx, embeddings.data(), N, n_past, n_threads, nullptr)) {
                 fprintf(stderr, "%s : failed to eval\n", __func__);
                 return 1;
             }
+
+            std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+            
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / 1000.;
+            std::cout << "llama_eval_internal took " << elapsed << " seconds\n";
 
             //n_past++;
             n_past = n_past + N;
@@ -1951,14 +1956,14 @@ static PyObject *
 load_slice(PyObject *self, PyObject *args) {
     gpt_params params;
 
-    int n_threads = 3;
     const char *cstr_path;
+
     if (!PyArg_ParseTuple(args, "s", &cstr_path))
         return NULL;
 
     std::string slice_path(cstr_path);
     
-    slice = new TransformerSlice(slice_path, params, n_threads);
+    slice = new TransformerSlice(slice_path, params);
 
     return PyLong_FromLong(0);
 }
@@ -2083,8 +2088,9 @@ int python_list_to_embeddings_vector(PyObject *embeddings_list, std::vector<floa
 static PyObject *
 propagate_forward(PyObject *self, PyObject *args) {
     PyObject *embeddings_list;
+    int n_threads;
 
-    if (!PyArg_ParseTuple(args, "O", &embeddings_list))
+    if (!PyArg_ParseTuple(args, "Oi", &embeddings_list, &n_threads))
         return NULL;
     
     std::vector<float> embeddings;
@@ -2098,9 +2104,8 @@ propagate_forward(PyObject *self, PyObject *args) {
     
     int n_embd = slice->get_n_embd();
     int n_vocab = slice->get_n_vocab();
-    int n_threads = 3;
 
-    int status = slice->forward(embeddings, output);
+    int status = slice->forward(embeddings, output, n_threads);
     if (status != 0) {
         std::cout << "something went wrong1\n";
         return PyLong_FromLong(status);

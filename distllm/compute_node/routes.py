@@ -179,9 +179,10 @@ class PropagateForwardHandler(RequestHandler):
     def __call__(self, message):
         shape = (message.axis0, message.axis1)
         tensor = Tensor(shape, message.values)
+        n_threads = message.n_threads
 
         try:
-            res_tensor = self.context.slice_container.forward(tensor)
+            res_tensor = self.context.slice_container.forward(tensor, n_threads)
         except NeuralComputationError:
             return protocol.ResponseWithError(operation=message.get_message(),
                                               error="neural_computation_error",

@@ -27,10 +27,10 @@ class SliceContainer:
 
         self.slice = GGMLSlice(slice_path)
 
-    def forward(self, tensor: Tensor):
+    def forward(self, tensor: Tensor, n_threads: int):
         if not self.is_loaded:
             raise SliceNotLoadedError()
-        return self.slice(tensor)
+        return self.slice(tensor, n_threads)
 
     def clear_context(self):
         if self.is_loaded:
@@ -66,7 +66,7 @@ class DummySlice(ModelSlice):
         self.k = k
         self.b = b
 
-    def __call__(self, tensor: Tensor):
+    def __call__(self, tensor: Tensor, n_threads: int):
         new_values = [self.k * v + self.b for v in tensor.values]
         return Tensor(tensor.shape, new_values)
 
@@ -78,10 +78,9 @@ class GGMLSlice(ModelSlice):
 
         llm.load_slice(self.path)
 
-    def __call__(self, tensor: Tensor):
-
+    def __call__(self, tensor: Tensor, n_threads: int):
         import llm
-        new_values = llm.propagate_forward(tensor.values)
+        new_values = llm.propagate_forward(tensor.values, n_threads)
         return Tensor(tensor.shape, new_values)
 
     def clear_context(self):

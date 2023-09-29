@@ -223,11 +223,11 @@ class Connection:
         message = self._get_response(message_out, sock)
         return json.loads(message.status_json)
 
-    def propagate_forward(self, tensor, shape):
+    def propagate_forward(self, tensor, shape, n_threads):
         """Send a tensor to a remote node and propagate it forward through layers of the slice"""
         sock = self._get_socket()
         axis0, axis1 = shape
-        message_out = protocol.RequestPropagateForward(axis0, axis1, tensor)
+        message_out = protocol.RequestPropagateForward(axis0, axis1, tensor, n_threads)
 
         message = self._get_response(message_out, sock)
 

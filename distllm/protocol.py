@@ -72,6 +72,7 @@ class RequestPropagateForward(Message):
     axis0: int
     axis1: int
     values: list
+    n_threads: int
 
 
 @dataclass

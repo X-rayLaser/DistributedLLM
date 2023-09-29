@@ -12,7 +12,6 @@ WORKDIR /vendor/llama.cpp
 
 RUN apt-get update && apt-get install build-essential -y \
     && mkdir /libs \
-    && make clean \
     && make libllama.so \
     && make libembdinput.so \
     && cp libllama.so /libs/libllama.so \

@@ -46,7 +46,7 @@ class FailingSliceContainer(SliceContainer):
     def load(self, f, metadata):
         raise Exception('Something went wrong')
 
-    def forward(self, tensor):
+    def forward(self, tensor, n_threads):
         raise NeuralComputationError('Something went wrong')
 
 

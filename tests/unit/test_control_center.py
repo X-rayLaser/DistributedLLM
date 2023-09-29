@@ -196,7 +196,7 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         self.socket.set_error_body("propagate_forward_request", body=response_body)
 
         self.assertRaises(OperationFailedError,
-                          lambda: self.connection.propagate_forward([32, 32], (1, 2)))
+                          lambda: self.connection.propagate_forward([32, 32], (1, 2), n_threads=2))
 
     def test_propagate_forward_other_failure(self):
         response_body = {
@@ -210,7 +210,7 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
         shape = [10, 20]
         tensor_to_send = list(range(200))
         self.assertRaises(OperationFailedError,
-                          lambda: self.connection.propagate_forward(tensor_to_send, shape))
+                          lambda: self.connection.propagate_forward(tensor_to_send, shape, n_threads=2))
 
     def test_propagate_forward_succeeds(self):
         response_body = {
@@ -223,11 +223,11 @@ class ConnectionWithMockedServerTests(unittest.TestCase):
 
         input_tensor = list(range(200))
         shape = [10, 20]
-        result = self.connection.propagate_forward(input_tensor, tuple(shape))
+        result = self.connection.propagate_forward(input_tensor, tuple(shape), n_threads=2)
 
         self.assertEqual(1, len(self.socket.recorded_requests))
         expected_request = protocol.RequestPropagateForward(
-            axis0=10, axis1=20, values=input_tensor
+            axis0=10, axis1=20, values=input_tensor, n_threads=2
         )
         self.assertEqual(expected_request, self.socket.recorded_requests[0])
 

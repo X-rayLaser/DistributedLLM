@@ -232,7 +232,7 @@ class PropagateForwardTests(unittest.TestCase):
 
         self.send_values = [1, 2, 3, 4, 5, 6]
         self.request_message = protocol.RequestPropagateForward(
-            axis0=2, axis1=3, values=self.send_values
+            axis0=2, axis1=3, values=self.send_values, n_threads=2
         )
 
     def test_cannot_compute_when_no_slice_loaded(self):
