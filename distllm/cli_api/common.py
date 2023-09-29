@@ -104,25 +104,25 @@ class DistributedLLM:
         for _ in range(max_steps):
             t1 = time.time()
             embeddings = llm.prepare_embeddings(extra_layers_path, tokens)
-            print(f"Prepare embedding took {time.time() - t1:.3f} seconds")
+            #print(f"Prepare embedding took {time.time() - t1:.3f} seconds")
 
             t2 = time.time()
             embeddings = self.propagate_tensor(embeddings, n_threads)
-            print(f"propagate_tensor took {time.time() - t2:.3f} seconds")
+            #print(f"propagate_tensor took {time.time() - t2:.3f} seconds")
 
             t3 = time.time()
             logits = llm.get_logits(extra_layers_path, embeddings, all_logits)
-            print(f"get_logits took {time.time() - t3:.3f} seconds")
+            #print(f"get_logits took {time.time() - t3:.3f} seconds")
 
             t4 = time.time()
             token_id = sampler(logits)
-            print(f"sampler took {time.time() - t4:.3f} seconds")
+            #print(f"sampler took {time.time() - t4:.3f} seconds")
 
             t5 = time.time()
             token_str = llm.decode_token(extra_layers_path, token_id)
 
-            print(f"decode_token took {time.time() - t5:.3f} seconds")
-            print()
+            #print(f"decode_token took {time.time() - t5:.3f} seconds")
+            #print()
             
             tokens.clear()
             tokens.append(token_id)

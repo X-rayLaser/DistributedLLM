@@ -150,6 +150,11 @@ struct my_file_loader {
         read_tensor_metadata(tensors_map);
         //std::cout << "loaded " << fname << "\n";
     }
+
+    llama_vocab& get_vocab() {
+        return vocab;
+    }
+
     void read_magic() {
         uint32_t magic = file.read_u32();
 
@@ -1545,6 +1550,10 @@ class TransformerSlice {
             //std::cout << " last elem " << ctx->embedding[ctx->embedding.size() - 1] <<  "\n";
 
             //std::cout << " first elem " << ctx->embedding[0] <<  "\n";
+
+            end = std::chrono::steady_clock::now();
+            elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / 1000.;
+            std::cout << "C++ side forward method took " << elapsed << " seconds\n";
             return 0;
         }
 
@@ -1773,8 +1782,8 @@ class LLMExtra {
             output_weight = load_tensor("output.weight", {n_embd, n_vocab});
         }
 
-        llama_vocab get_vocab() const {
-            return loader->file_loader->vocab;
+        llama_vocab& get_vocab() const {
+            return loader->file_loader->get_vocab();
         }
 
         uint32_t get_n_embd() const {
@@ -1849,8 +1858,8 @@ std::vector<float> get_inputs(const LLMExtra* llm_extra, const llama_token * tok
 }
 
 
-std::vector<float> get_llm_output(const LLMExtra* llm_extra, const std::vector<float>& embeddings,
-                                  bool all_logits=false) {
+void get_llm_output(const LLMExtra* llm_extra, const std::vector<float>& embeddings,
+                    std::vector<float>& logits_out, bool all_logits=false) {
     auto n_embd = llm_extra->get_n_embd();
     auto n_vocab = llm_extra->get_n_vocab();
     auto N = (int) (embeddings.size() / n_embd);
@@ -1905,7 +1914,6 @@ std::vector<float> get_llm_output(const LLMExtra* llm_extra, const std::vector<f
 
     struct ggml_tensor * res = gf.nodes[gf.n_nodes - 1];
 
-    std::vector<float> logits_out;
     size_t logits_total;
     int logits_offset;
     if (all_logits) {
@@ -1921,11 +1929,11 @@ std::vector<float> get_llm_output(const LLMExtra* llm_extra, const std::vector<f
     memcpy(logits_out.data(), (float *) ggml_get_data(res) + logits_offset, sizeof(float) * logits_total);
 
     ggml_free(ctx0);
-    return logits_out;
 }
 
 llama_token sample_next_token(const LLMExtra* llm_extra, const std::vector<float>& embeddings) {
-    std::vector<float> logits_out = get_llm_output(llm_extra, embeddings);
+    std::vector<float> logits_out;
+    get_llm_output(llm_extra, embeddings, logits_out);
     
     float max_value = -(1000000000000.0);
     llama_token token_id = 0;
@@ -2014,7 +2022,7 @@ tokenize_prompt(PyObject *self, PyObject *args) {
     }
 
     return result;
-} 
+}
 
 static PyObject *
 prepare_embeddings(PyObject *self, PyObject *args) {
@@ -2087,18 +2095,28 @@ int python_list_to_embeddings_vector(PyObject *embeddings_list, std::vector<floa
 
 static PyObject *
 propagate_forward(PyObject *self, PyObject *args) {
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
     PyObject *embeddings_list;
     int n_threads;
 
     if (!PyArg_ParseTuple(args, "Oi", &embeddings_list, &n_threads))
         return NULL;
     
+    std::chrono::steady_clock::time_point before_list2vec_conversion = std::chrono::steady_clock::now();
+
     std::vector<float> embeddings;
     int error_code = python_list_to_embeddings_vector(embeddings_list, embeddings);
     
     if (error_code) {
         return NULL;
     }
+
+    std::chrono::steady_clock::time_point after_list2vec_conversion = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        after_list2vec_conversion - before_list2vec_conversion
+    ).count() / 1000.;
+    std::cout << "in propagate_forward list2vec took " << elapsed << " seconds\n";
     
     std::vector<float> output;
     
@@ -2120,6 +2138,10 @@ propagate_forward(PyObject *self, PyObject *args) {
         PyList_SetItem(result, i, python_value);
     }
 
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    
+    elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / 1000.;
+    std::cout << "llm.so propagate_forward took " << elapsed << " seconds\n";
     return result;
 }
 
@@ -2142,7 +2164,10 @@ get_logits(PyObject *self, PyObject *args) {
     }
 
     load_llm_extra(extra_layers_path);
-    std::vector<float> logits = get_llm_output(llm_extra, embeddings, (bool) all_logits);
+    std::vector<float> logits;
+
+    get_llm_output(llm_extra, embeddings, logits, (bool) all_logits);
+
     //std::cout << "IN GET_LOGITS: LOGITS.SIZE() IS " << logits.size() << std::endl;
     PyObject* result = PyList_New(logits.size());
 
@@ -2190,9 +2215,9 @@ decode_token(PyObject *self, PyObject *args) {
     std::string extra_layers_path_string = extra_layers_path;
     load_llm_extra(extra_layers_path_string);
     
-    llama_vocab vocab = llm_extra->get_vocab();
+    //llama_vocab vocab = llm_extra->get_vocab();
 
-    std::string tok = vocab.id_to_token[token_id].tok;
+    std::string tok = llm_extra->get_vocab().id_to_token[token_id].tok;
     return PyUnicode_FromString(tok.c_str());
 }
 
